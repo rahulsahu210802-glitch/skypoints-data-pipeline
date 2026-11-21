@@ -1,0 +1,14 @@
+# Local tooling and credentials
+.databricks/
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+
+# Databricks build output
+.bundle/
+dist/
+
+# Project-provided reference files are read-only and should not be committed.
+sources/
+AGENTS.md

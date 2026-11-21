@@ -1,0 +1,20 @@
+bundle:
+  name: skypoints-member-pipeline
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Unity Catalog name that will contain the assessment schema.
+    default: main
+  schema:
+    description: Schema that will contain the pipeline tables.
+    default: skypoints
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}

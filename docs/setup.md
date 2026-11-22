@@ -33,15 +33,23 @@ The committed fixtures can be regenerated deterministically:
 python tools/generate_sample_data.py
 ```
 
-Upload:
+Upload the baseline files:
 
 - `samples/members_20240115.psv` to
   `/Volumes/workspace/skypoints/landing/members/members_20240115.psv`
 - `samples/redemptions_20240115.json` to
   `/Volumes/workspace/skypoints/landing/redemptions/redemptions_20240115.json`
 
+For the rejection demonstration, also upload:
+
+- `samples/members_20240116.psv` to
+  `/Volumes/workspace/skypoints/landing/members/members_20240116.psv`
+- `samples/redemptions_20240116.json` to
+  `/Volumes/workspace/skypoints/landing/redemptions/redemptions_20240116.json`
+
 The exact defaults are configured by `profile_file_path`,
 `redemption_file_path`, and the shared logical `batch_id` in `databricks.yml`.
+They currently select the `20240116` rejection-demonstration delivery.
 
 The production landing contract uses a new immutable, date-specific path for
 each delivery. Do not replace a file after it has been processed.

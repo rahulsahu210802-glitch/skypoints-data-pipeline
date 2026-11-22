@@ -10,9 +10,10 @@ Databricks implementation for the Incubyte Data Engineer assessment.
 - **Quality:** report duplicate, missing-key, unsupported-country, orphan-transaction, and Gold consistency checks.
 - **Sample validation:** assert the synthetic assignment fixtures produce the expected Bronze, Silver, rejection, redemption, and Gold counts.
 
-The primary assessment fixture is one global pipe-delimited file containing 150
-members across `USA`, `IND`, `PHIL`, `CAN`, and `AU`. It follows the upstream
-Source System contract in the PDF. The separate country workbooks are retained
+The assessment fixtures include a valid baseline delivery and a second daily
+delivery containing 150 valid members across `USA`, `IND`, `PHIL`, `CAN`, and
+`AU`, plus five invalid records that exercise quarantine rules. They follow the
+upstream Source System contract in the PDF. The separate country workbooks are retained
 only as an optional schema-harmonization reference; they are not tasks in the
 primary workflow. Redemption JSON uses Spark's binary-file reader so each
 formatted file is retained as one Bronze document on serverless compute.
@@ -23,9 +24,9 @@ See [docs/excel-adapter.md](docs/excel-adapter.md) for the optional workbook com
 ## Setup and execution
 
 1. Create the `skypoints` schema and tables using [sql/01_create_tables.sql](sql/01_create_tables.sql).
-2. Upload `samples/members_20240115.psv` and
-   `samples/redemptions_20240115.json` to the exact Unity Catalog Volume paths
-   configured in `databricks.yml`.
+2. Upload the dated files under `samples/` to their matching member and
+   redemption landing folders. The bundle defaults point to the second-day
+   negative-validation fixtures.
 3. Validate and deploy the bundle. The workflow uses Free Edition-compatible serverless compute and installs its Python dependencies from `pyproject.toml`:
 
    ```bash

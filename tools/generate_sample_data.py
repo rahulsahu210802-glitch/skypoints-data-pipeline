@@ -1,12 +1,15 @@
 from datetime import date, timedelta
 import json
 from pathlib import Path
+from typing import TypedDict
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLES = ROOT / "samples"
 MEMBER_FILE = SAMPLES / "members_20240115.psv"
 REDEMPTION_FILE = SAMPLES / "redemptions_20240115.json"
+NEGATIVE_MEMBER_FILE = SAMPLES / "members_20240116.psv"
+NEGATIVE_REDEMPTION_FILE = SAMPLES / "redemptions_20240116.json"
 
 COUNTRIES = (
     ("USA", "CA", "90210"),
@@ -16,6 +19,20 @@ COUNTRIES = (
     ("AU", "VIC", "3000"),
 )
 TIERS = ("GLD", "SLV", "PLT")
+
+
+class Redemption(TypedDict):
+    txn_id: str
+    txn_date: str
+    partner: str
+    miles_redeemed: int
+    status: str
+
+
+class RedemptionFeed(TypedDict):
+    member_id: str
+    feed_date: str
+    redemptions: list[Redemption]
 
 
 def _detail(
@@ -50,7 +67,7 @@ def _detail(
     )
 
 
-def build_members() -> list[str]:
+def build_members(*, include_invalid: bool = False) -> list[str]:
     rows = [
         "|H|Member_Name|Member_Id|Enrollment_Date|Last_Flight_Date|"
         "Tier_Code|Agent_Name|State|Country|Post_Code|DOB|Is_Active",
@@ -102,20 +119,45 @@ def build_members() -> list[str]:
             )
             member_number += 1
 
-    if len(rows) != 151:
-        raise AssertionError(f"Expected one header and 150 details, got {len(rows)} rows.")
+    if include_invalid:
+        rows.extend([
+            _detail(
+                "", "BAD0001", "20200101", "20230101", "GLD", "Agent_1",
+                "CA", "USA", "90210", "19900101", "A",
+            ),
+            _detail(
+                "Missing_ID", "", "20200101", "20230101", "SLV", "Agent_2",
+                "TN", "IND", "60001", "19900101", "A",
+            ),
+            _detail(
+                "Invalid_Enrollment", "BAD0003", "20241340", "20230101", "PLT",
+                "Agent_3", "NCR", "PHIL", "1000", "19900101", "A",
+            ),
+            _detail(
+                "Invalid_Tier", "BAD0004", "20200101", "20230101", "BRZ",
+                "Agent_4", "ONT", "CAN", "K1A0B", "19900101", "A",
+            ),
+            _detail(
+                "Unsupported_Country", "BAD0005", "20200101", "20230101", "GLD",
+                "Agent_5", "NA", "XYZ", "00000", "19900101", "A",
+            ),
+        ])
+
+    expected_rows = 156 if include_invalid else 151
+    if len(rows) != expected_rows:
+        raise AssertionError(f"Expected {expected_rows} rows, got {len(rows)} rows.")
     return rows
 
 
-def main() -> None:
-    SAMPLES.mkdir(exist_ok=True)
-    MEMBER_FILE.write_text("\n".join(build_members()) + "\n", encoding="utf-8")
-    REDEMPTION_FILE.write_text(
-        json.dumps(
-            [
+def build_redemptions(
+    feed_date: str,
+    *,
+    include_invalid: bool = False,
+) -> list[RedemptionFeed]:
+    feeds: list[RedemptionFeed] = [
                 {
                     "member_id": "223457",
-                    "feed_date": "20240115",
+                    "feed_date": feed_date,
                     "redemptions": [
                         {
                             "txn_id": "RX10091",
@@ -135,7 +177,7 @@ def main() -> None:
                 },
                 {
                     "member_id": "223458",
-                    "feed_date": "20240115",
+                    "feed_date": feed_date,
                     "redemptions": [
                         {
                             "txn_id": "RX10093",
@@ -162,7 +204,7 @@ def main() -> None:
                 },
                 {
                     "member_id": "223459",
-                    "feed_date": "20240115",
+                    "feed_date": feed_date,
                     "redemptions": [
                         {
                             "txn_id": "RX10096",
@@ -182,7 +224,7 @@ def main() -> None:
                 },
                 {
                     "member_id": "22345",
-                    "feed_date": "20240115",
+                    "feed_date": feed_date,
                     "redemptions": [
                         {
                             "txn_id": "RX10098",
@@ -200,14 +242,60 @@ def main() -> None:
                         },
                     ],
                 },
-            ],
-            indent=2,
-        )
-        + "\n",
+    ]
+
+    if include_invalid:
+        feeds[0]["redemptions"].append({
+            "txn_id": "RXBAD01",
+            "txn_date": "20240112",
+            "partner": "AeroLink",
+            "miles_redeemed": -100,
+            "status": "COMPLETED",
+        })
+        feeds[1]["redemptions"].append({
+            "txn_id": "RXBAD02",
+            "txn_date": "20240117",
+            "partner": "CloudMiles",
+            "miles_redeemed": 2500,
+            "status": "COMPLETED",
+        })
+        feeds[2]["redemptions"].append({
+            "txn_id": "",
+            "txn_date": "20240112",
+            "partner": "PacificAir",
+            "miles_redeemed": 3000,
+            "status": "COMPLETED",
+        })
+
+    return feeds
+
+
+def _write_json(path: Path, feeds: list[RedemptionFeed]) -> None:
+    path.write_text(json.dumps(feeds, indent=2) + "\n", encoding="utf-8")
+
+
+def main() -> None:
+    SAMPLES.mkdir(exist_ok=True)
+    MEMBER_FILE.write_text(
+        "\n".join(build_members()) + "\n",
         encoding="utf-8",
     )
-    print(f"Wrote {MEMBER_FILE}")
-    print(f"Wrote {REDEMPTION_FILE}")
+    NEGATIVE_MEMBER_FILE.write_text(
+        "\n".join(build_members(include_invalid=True)) + "\n",
+        encoding="utf-8",
+    )
+    _write_json(REDEMPTION_FILE, build_redemptions("20240115"))
+    _write_json(
+        NEGATIVE_REDEMPTION_FILE,
+        build_redemptions("20240116", include_invalid=True),
+    )
+    for path in (
+        MEMBER_FILE,
+        REDEMPTION_FILE,
+        NEGATIVE_MEMBER_FILE,
+        NEGATIVE_REDEMPTION_FILE,
+    ):
+        print(f"Wrote {path}")
 
 
 if __name__ == "__main__":

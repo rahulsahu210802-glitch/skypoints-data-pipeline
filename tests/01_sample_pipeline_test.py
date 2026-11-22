@@ -21,6 +21,7 @@ bronze_redemptions = spark.table(f"{prefix}`bronze_redemption_files`")
 members = spark.table(f"{prefix}`silver_members`")
 member_rejections = spark.table(f"{prefix}`member_rejections`")
 redemptions = spark.table(f"{prefix}`silver_redemptions`")
+redemption_rejections = spark.table(f"{prefix}`redemption_rejections`")
 redemption_view = spark.table(f"{prefix}`member_redemption_view`")
 quality_results = spark.table(f"{prefix}`quality_check_results`")
 
@@ -42,10 +43,10 @@ def _quality_count(check_name):
 
 
 checks = [
-    ("bronze_member_rows_for_batch", 151, _count(
+    ("bronze_member_rows_for_batch", 156, _count(
         bronze_members.where(F.col("batch_id") == batch_id)
     )),
-    ("bronze_global_rows_for_batch", 151, _count(
+    ("bronze_global_rows_for_batch", 156, _count(
         bronze_members.where(
             (F.col("batch_id") == batch_id)
             & (F.col("source_country") == "GLOBAL")
@@ -58,8 +59,38 @@ checks = [
     ("distinct_member_business_keys", 150, members.select(
         "member_business_key"
     ).distinct().count()),
-    ("member_rejections_for_batch", 0, _count(
+    ("member_rejections_for_batch", 5, _count(
         member_rejections.where(F.col("batch_id") == batch_id)
+    )),
+    ("missing_member_name_rejections", 1, _count(
+        member_rejections.where(
+            (F.col("batch_id") == batch_id)
+            & (F.col("rejection_reason") == "Missing member name")
+        )
+    )),
+    ("missing_member_id_rejections", 1, _count(
+        member_rejections.where(
+            (F.col("batch_id") == batch_id)
+            & (F.col("rejection_reason") == "Missing member ID")
+        )
+    )),
+    ("invalid_enrollment_rejections", 1, _count(
+        member_rejections.where(
+            (F.col("batch_id") == batch_id)
+            & (F.col("rejection_reason") == "Invalid or missing enrollment date")
+        )
+    )),
+    ("invalid_tier_rejections", 1, _count(
+        member_rejections.where(
+            (F.col("batch_id") == batch_id)
+            & (F.col("rejection_reason") == "Invalid tier code")
+        )
+    )),
+    ("unsupported_country_rejections", 1, _count(
+        member_rejections.where(
+            (F.col("batch_id") == batch_id)
+            & (F.col("rejection_reason") == "Missing or unsupported country code")
+        )
     )),
     ("members_with_unknown_age", 0, _count(
         members.where(F.col("age").isNull())
@@ -68,6 +99,27 @@ checks = [
         members.where(F.col("stale_member"))
     )),
     ("silver_redemption_transactions", 9, _count(redemptions)),
+    ("redemption_rejections_for_batch", 3, _count(
+        redemption_rejections.where(F.col("batch_id") == batch_id)
+    )),
+    ("negative_miles_rejections", 1, _count(
+        redemption_rejections.where(
+            (F.col("batch_id") == batch_id)
+            & (F.col("rejection_reason") == "Miles redeemed cannot be negative")
+        )
+    )),
+    ("future_transaction_rejections", 1, _count(
+        redemption_rejections.where(
+            (F.col("batch_id") == batch_id)
+            & (F.col("rejection_reason") == "Transaction date is after feed date")
+        )
+    )),
+    ("missing_transaction_id_rejections", 1, _count(
+        redemption_rejections.where(
+            (F.col("batch_id") == batch_id)
+            & (F.col("rejection_reason") == "Missing transaction ID")
+        )
+    )),
     ("joined_sample_redemptions", 9, _count(
         redemption_view.where(F.col("member_name").isNotNull())
     )),

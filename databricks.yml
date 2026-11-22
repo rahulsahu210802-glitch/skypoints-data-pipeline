@@ -13,13 +13,13 @@ variables:
     default: skypoints
   batch_id:
     description: Logical delivery date or ID shared by all tasks for one feed.
-    default: "20240115"
+    default: "20240116"
   profile_file_path:
     description: Exact path of the immutable daily global member flat file.
-    default: /Volumes/workspace/skypoints/landing/members/members_20240115.psv
+    default: /Volumes/workspace/skypoints/landing/members/members_20240116.psv
   redemption_file_path:
     description: Exact path of the immutable daily redemption JSON file.
-    default: /Volumes/workspace/skypoints/landing/redemptions/redemptions_20240115.json
+    default: /Volumes/workspace/skypoints/landing/redemptions/redemptions_20240116.json
 
 targets:
   dev:

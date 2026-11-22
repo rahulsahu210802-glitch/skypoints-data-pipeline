@@ -17,20 +17,28 @@ The provided assessment files remain excluded from Git.
 
 ## 2. Databricks database home
 
-Use one schema for this assessment:
+Use one schema for this assessment in the catalog selected in your SQL editor:
 
 ```sql
-CREATE SCHEMA IF NOT EXISTS main.skypoints;
+CREATE SCHEMA IF NOT EXISTS skypoints;
 ```
 
-If your Databricks workspace uses another Unity Catalog catalog, replace `main` with that catalog name. Run `sql/01_create_tables.sql` in a Databricks SQL editor after selecting the same catalog and schema.
+Run `sql/01_create_tables.sql` after selecting the catalog in your SQL editor. The default bundle catalog is `main`; change it in `databricks.yml` if needed.
 
-## 3. Databricks project deployment
+## 3. Upload sample inputs
 
-Install and authenticate the Databricks CLI, then validate the bundle from this folder:
+Upload the member workbook/CSV files to the paths configured by `profile_ind_path`, `profile_usa_path`, and `profile_aus_path` in `databricks.yml`. Upload redemption JSON files to `redemption_file_path`. For a pipe-delimited production feed, set the corresponding profile path to a file or directory of text files.
+
+The pandas-based workbook/CSV reader is only intended for the small assessment samples. Do not use it to ingest production-sized data.
+XLSX sample ingestion requires `pandas` and `openpyxl` on the Databricks cluster; CSV sample ingestion requires `pandas`.
+
+## 4. Databricks project deployment
+
+Install and authenticate the Databricks CLI, set `cluster_id` to an existing cluster, then validate and deploy the bundle from this folder:
 
 ```bash
-databricks bundle validate --target dev
+databricks bundle validate --target dev --var="cluster_id=<your-cluster-id>"
+databricks bundle deploy --target dev --var="cluster_id=<your-cluster-id>"
 ```
 
-We will add notebooks and the daily Databricks Workflow as the pipeline is implemented.
+The bundle creates the `skypoints-daily-pipeline` job. It ingests the three member feeds and redemption feed, processes Silver and Gold, and runs the quality checks. Use a batch-specific landing path or a new batch ID for each daily delivery; reuse a batch ID only when retrying that same delivery.

@@ -9,6 +9,13 @@ CREATE TABLE IF NOT EXISTS skypoints.bronze_member_files (
   raw_record STRING
 ) USING DELTA;
 
+CREATE TABLE IF NOT EXISTS skypoints.bronze_redemption_files (
+  batch_id STRING NOT NULL,
+  source_file STRING NOT NULL,
+  ingested_at TIMESTAMP NOT NULL,
+  raw_json STRING NOT NULL
+) USING DELTA;
+
 CREATE TABLE IF NOT EXISTS skypoints.silver_members (
   member_business_key STRING NOT NULL,
   source_member_id STRING NOT NULL,
@@ -19,6 +26,10 @@ CREATE TABLE IF NOT EXISTS skypoints.silver_members (
   last_flight_date DATE,
   country_code STRING NOT NULL,
   member_type STRING,
+  agent_name STRING,
+  state STRING,
+  post_code STRING,
+  active_flag STRING,
   age INT,
   stale_member BOOLEAN,
   source_updated_at TIMESTAMP,
@@ -39,6 +50,7 @@ CREATE TABLE IF NOT EXISTS skypoints.member_rejections (
 CREATE TABLE IF NOT EXISTS skypoints.silver_redemptions (
   transaction_id STRING NOT NULL,
   source_member_id STRING NOT NULL,
+  source_file STRING NOT NULL,
   transaction_date DATE NOT NULL,
   partner STRING,
   miles_redeemed BIGINT,
@@ -46,4 +58,12 @@ CREATE TABLE IF NOT EXISTS skypoints.silver_redemptions (
   feed_date DATE,
   batch_id STRING NOT NULL,
   ingested_at TIMESTAMP NOT NULL
+) USING DELTA;
+
+CREATE TABLE IF NOT EXISTS skypoints.redemption_rejections (
+  batch_id STRING NOT NULL,
+  source_file STRING NOT NULL,
+  raw_record STRING,
+  rejection_reason STRING NOT NULL,
+  rejected_at TIMESTAMP NOT NULL
 ) USING DELTA;

@@ -72,7 +72,10 @@ def _member_rows(path: str):
     source = (
         spark.read.text(path)
         .where(F.trim(F.col("value")) != "")
-        .select(F.input_file_name().alias("source_file"), F.col("value").alias("raw_record"))
+        .select(
+            F.col("_metadata.file_path").alias("source_file"),
+            F.col("value").alias("raw_record"),
+        )
     )
     return source
 
@@ -112,7 +115,7 @@ if redemption_file_path:
         .where(F.trim(F.col("value")) != "")
         .select(
             F.lit(batch_id).alias("batch_id"),
-            F.input_file_name().alias("source_file"),
+            F.col("_metadata.file_path").alias("source_file"),
             F.current_timestamp().alias("ingested_at"),
             F.col("value").cast("string").alias("raw_json"),
         )

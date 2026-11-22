@@ -11,18 +11,15 @@ variables:
   schema:
     description: Schema that will contain the pipeline tables.
     default: skypoints
-  profile_ind_path:
-    description: IND daily member file or folder path in a Unity Catalog Volume.
-    default: /Volumes/workspace/skypoints/landing/members/IND.xlsx
-  profile_usa_path:
-    description: USA daily member file or folder path in a Unity Catalog Volume.
-    default: /Volumes/workspace/skypoints/landing/members/USA.xlsx
-  profile_aus_path:
-    description: AUS daily member file or folder path in a Unity Catalog Volume.
-    default: /Volumes/workspace/skypoints/landing/members/AUS.xlsx
+  batch_id:
+    description: Logical delivery date or ID shared by all tasks for one feed.
+    default: "20240115"
+  profile_file_path:
+    description: Exact path of the immutable daily global member flat file.
+    default: /Volumes/workspace/skypoints/landing/members/members_20240115.psv
   redemption_file_path:
-    description: Daily redemption JSON file or folder path in a Unity Catalog Volume.
-    default: /Volumes/workspace/skypoints/landing/redemptions/
+    description: Exact path of the immutable daily redemption JSON file.
+    default: /Volumes/workspace/skypoints/landing/redemptions/redemptions_20240115.json
 
 targets:
   dev:

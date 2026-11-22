@@ -38,10 +38,39 @@ CREATE TABLE IF NOT EXISTS skypoints.silver_members (
   ingested_at TIMESTAMP NOT NULL
 ) USING DELTA;
 
+CREATE TABLE IF NOT EXISTS skypoints.country_target_config (
+  country_code STRING NOT NULL,
+  target_table STRING NOT NULL,
+  is_active BOOLEAN NOT NULL
+) USING DELTA;
+
+MERGE INTO skypoints.country_target_config AS target
+USING (
+  SELECT * FROM VALUES
+    ('USA', 'members_usa', TRUE),
+    ('IND', 'members_india', TRUE),
+    ('PHIL', 'members_philippines', TRUE),
+    ('CAN', 'members_canada', TRUE),
+    ('AU', 'members_australia', TRUE)
+  AS configuration(country_code, target_table, is_active)
+) AS source
+ON target.country_code = source.country_code
+WHEN MATCHED THEN UPDATE SET
+  target.target_table = source.target_table,
+  target.is_active = source.is_active
+WHEN NOT MATCHED THEN INSERT (country_code, target_table, is_active)
+VALUES (source.country_code, source.target_table, source.is_active);
+
 CREATE TABLE IF NOT EXISTS skypoints.members_india
 LIKE skypoints.silver_members;
 
 CREATE TABLE IF NOT EXISTS skypoints.members_usa
+LIKE skypoints.silver_members;
+
+CREATE TABLE IF NOT EXISTS skypoints.members_philippines
+LIKE skypoints.silver_members;
+
+CREATE TABLE IF NOT EXISTS skypoints.members_canada
 LIKE skypoints.silver_members;
 
 CREATE TABLE IF NOT EXISTS skypoints.members_australia

@@ -19,19 +19,32 @@ prefix = f"`{catalog}`.`{schema}`."
 members = spark.table(f"{prefix}`silver_members`")
 redemptions = spark.table(f"{prefix}`silver_redemptions`")
 results_table = f"{prefix}`quality_check_results`"
+config_table = f"{prefix}`country_target_config`"
+
+targets = (
+    spark.table(config_table)
+    .where(F.col("is_active"))
+    .select("country_code", "target_table")
+    .collect()
+)
+if not targets:
+    raise ValueError("No active country publication targets are configured.")
 
 country_tables = [
-    spark.table(f"{prefix}`members_india`")
-    .select("member_business_key", "source_member_id", "country_code")
-    .withColumn("_expected_country", F.lit("IND")),
-    spark.table(f"{prefix}`members_usa`")
-    .select("member_business_key", "source_member_id", "country_code")
-    .withColumn("_expected_country", F.lit("USA")),
-    spark.table(f"{prefix}`members_australia`")
-    .select("member_business_key", "source_member_id", "country_code")
-    .withColumn("_expected_country", F.lit("AUS")),
+    (
+        spark.table(f"{catalog}.{schema}.{row['target_table']}")
+        .select("member_business_key", "source_member_id", "country_code")
+        .withColumn("_expected_country", F.lit(row["country_code"]))
+    )
+    for row in targets
 ]
-gold_members = country_tables[0].unionByName(country_tables[1]).unionByName(country_tables[2])
+gold_members = country_tables[0]
+for country_table in country_tables[1:]:
+    gold_members = gold_members.unionByName(country_table)
+
+supported_country_codes = [row["country_code"] for row in targets]
+member_keys = members.select("member_business_key").distinct()
+gold_keys = gold_members.select("member_business_key").distinct()
 
 checks = [
     ("duplicate_silver_member_keys", members.groupBy("member_business_key").count().where("count > 1").count()),
@@ -39,7 +52,7 @@ checks = [
     ("missing_member_names", members.where(F.col("member_name").isNull() | (F.col("member_name") == "")).count()),
     ("unsupported_member_countries", members.where(
         F.col("country_code").isNull()
-        | (~F.col("country_code").isin("IND", "USA", "AUS"))
+        | (~F.col("country_code").isin(*supported_country_codes))
     ).count()),
     ("duplicate_transaction_ids", redemptions.groupBy("transaction_id").count().where("count > 1").count()),
     ("redemptions_without_member", redemptions.join(
@@ -51,6 +64,16 @@ checks = [
     ("gold_country_mismatch", gold_members.where(
         F.col("country_code").isNull()
         | (F.col("country_code") != F.col("_expected_country"))
+    ).count()),
+    ("members_missing_from_gold", member_keys.join(
+        gold_keys,
+        "member_business_key",
+        "left_anti",
+    ).count()),
+    ("unexpected_members_in_gold", gold_keys.join(
+        member_keys,
+        "member_business_key",
+        "left_anti",
     ).count()),
 ]
 

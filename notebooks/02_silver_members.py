@@ -24,6 +24,7 @@ schema_name = f"`{catalog}`.`{schema}`"
 bronze_table = f"{schema_name}.`bronze_member_files`"
 silver_table = f"{schema_name}.`silver_members`"
 rejections_table = f"{schema_name}.`member_rejections`"
+country_config_table = f"{schema_name}.`country_target_config`"
 
 as_of_date = (
     F.to_date(F.lit(as_of_date_text), "yyyy-MM-dd")
@@ -59,7 +60,8 @@ bronze = bronze.withColumn(
     ),
 )
 
-fields = F.split(F.col("raw_record"), r"\|")
+pipe_record = F.regexp_replace(F.trim(F.col("raw_record")), r"^\|", "")
+fields = F.split(pipe_record, r"\|")
 
 
 def _pipe_field(position):
@@ -98,10 +100,9 @@ parsed = bronze.select(
     _pipe_field(6).alias("_pipe_tier"),
     _pipe_field(7).alias("_pipe_agent"),
     _pipe_field(8).alias("_pipe_state"),
-    F.when(F.size(fields) >= 12, _pipe_field(9))
-     .otherwise(F.lit(None).cast("string")).alias("_pipe_post_code"),
     F.when(F.size(fields) >= 12, _pipe_field(10))
-     .otherwise(_pipe_field(9)).alias("_pipe_country"),
+     .otherwise(F.lit(None).cast("string")).alias("_pipe_post_code"),
+    _pipe_field(9).alias("_pipe_country"),
     F.when(F.size(fields) >= 12, _pipe_field(11))
      .otherwise(_pipe_field(10)).alias("_pipe_dob"),
     F.when(F.size(fields) >= 12, _pipe_field(12))
@@ -146,10 +147,10 @@ normalized = parsed.select(
      .otherwise(_date(F.col("_pipe_last_flight_date"))).alias("last_flight_date"),
     F.when(
         F.col("_is_sample_json"),
-        F.when(F.upper(F.col("source_country")) == "AU", "AUS")
+        F.when(F.upper(F.col("source_country")) == "AUS", "AU")
          .otherwise(F.upper(F.col("source_country"))),
     ).otherwise(
-        F.when(F.upper(F.col("_pipe_country")) == "AU", "AUS")
+        F.when(F.upper(F.col("_pipe_country")) == "AUS", "AU")
          .otherwise(F.upper(F.col("_pipe_country")))
     ).alias("country_code"),
     F.when(F.col("_is_sample_json"), F.upper(F.trim(F.col("_sample_member_type"))))
@@ -169,6 +170,18 @@ detail = normalized.where(
     | (_pipe_field(1) == "D")
 )
 
+supported_country_codes = [
+    row["country_code"]
+    for row in (
+        spark.table(country_config_table)
+        .where(F.col("is_active"))
+        .select("country_code")
+        .collect()
+    )
+]
+if not supported_country_codes:
+    raise ValueError("No active countries exist in country_target_config.")
+
 validated = detail.withColumn(
     "rejection_reason",
     F.when(
@@ -176,7 +189,9 @@ validated = detail.withColumn(
         "Malformed detail record: expected 11 or 12 fields",
     )
     .when(F.col("source_member_id").isNull() | (F.col("source_member_id") == ""), "Missing member ID")
+    .when(F.length(F.col("source_member_id")) > 18, "Member ID exceeds 18 characters")
     .when(F.col("member_name").isNull() | (F.col("member_name") == ""), "Missing member name")
+    .when(F.length(F.col("member_name")) > 255, "Member name exceeds 255 characters")
     .when(F.col("enrollment_date").isNull(), "Invalid or missing enrollment date")
     .when(F.col("enrollment_date") > as_of_date, "Enrollment date is in the future")
     .when(
@@ -196,8 +211,16 @@ validated = detail.withColumn(
     .when(
         F.col("country_code").isNull()
         | (F.col("country_code") == "")
-        | (~F.col("country_code").isin("IND", "USA", "AUS")),
+        | (~F.col("country_code").isin(*supported_country_codes)),
         "Missing or unsupported country code",
+    )
+    .when(F.length(F.col("state")) > 5, "State exceeds 5 characters")
+    .when(F.length(F.col("post_code")) > 5, "Post code exceeds 5 characters")
+    .when(F.length(F.col("agent_name")) > 255, "Agent name exceeds 255 characters")
+    .when(
+        F.col("active_flag").isNotNull()
+        & (~F.col("active_flag").isin("A", "I")),
+        "Invalid active member flag",
     )
 )
 
@@ -258,6 +281,27 @@ valid_members = (
     .drop("_row_number")
 )
 
+member_value_changed = "NOT (" + " AND ".join([
+    f"target.{column} <=> source.{column}"
+    for column in (
+        "source_member_id", "member_name", "tier_code", "date_of_birth",
+        "enrollment_date", "last_flight_date", "country_code", "member_type",
+        "agent_name", "state", "post_code", "active_flag", "age",
+        "stale_member",
+    )
+]) + ")"
+source_is_latest = (
+    "("
+    "source.source_updated_at IS NOT NULL AND ("
+    "target.source_updated_at IS NULL "
+    "OR source.source_updated_at > target.source_updated_at "
+    "OR (source.source_updated_at = target.source_updated_at "
+    "AND source.ingested_at >= target.ingested_at)"
+    ")) OR (source.source_updated_at IS NULL "
+    "AND target.source_updated_at IS NULL "
+    "AND source.ingested_at >= target.ingested_at)"
+)
+
 (
     DeltaTable.forName(spark, silver_table.replace("`", ""))
     .alias("target")
@@ -266,17 +310,7 @@ valid_members = (
         "target.member_business_key = source.member_business_key",
     )
     .whenMatchedUpdateAll(
-        condition=(
-            "("
-            "source.source_updated_at IS NOT NULL AND ("
-            "target.source_updated_at IS NULL "
-            "OR source.source_updated_at > target.source_updated_at "
-            "OR (source.source_updated_at = target.source_updated_at "
-            "AND source.ingested_at >= target.ingested_at)"
-            ")) OR (source.source_updated_at IS NULL "
-            "AND target.source_updated_at IS NULL "
-            "AND source.ingested_at >= target.ingested_at)"
-        )
+        condition=f"({source_is_latest}) AND ({member_value_changed})"
     )
     .whenNotMatchedInsertAll()
     .execute()

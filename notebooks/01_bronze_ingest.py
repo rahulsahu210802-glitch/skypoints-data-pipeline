@@ -3,6 +3,7 @@
 # samples only; production feeds should use distributed text ingestion.
 
 from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 import json
 
@@ -12,7 +13,7 @@ from pyspark.sql import functions as F
 dbutils.widgets.text("catalog", "main", "Unity Catalog")
 dbutils.widgets.text("schema", "skypoints", "Schema")
 dbutils.widgets.text("profile_file_path", "", "Member file or folder path")
-dbutils.widgets.text("source_country", "", "Source country (IND/USA/AUS)")
+dbutils.widgets.text("source_country", "", "Source country for optional workbook input")
 dbutils.widgets.text("redemption_file_path", "", "Redemption JSON file or folder path")
 dbutils.widgets.text("batch_id", "", "Batch ID")
 
@@ -29,9 +30,6 @@ if not catalog or not schema:
     raise ValueError("Both catalog and schema parameters must be provided.")
 if not profile_file_path and not redemption_file_path:
     raise ValueError("Provide a member file path, a redemption path, or both.")
-if profile_file_path and source_country not in {"IND", "USA", "AUS"}:
-    raise ValueError("source_country must be IND, USA, or AUS.")
-
 schema_name = f"`{catalog}`.`{schema}`"
 member_table = f"{schema_name}.`bronze_member_files`"
 redemption_table = f"{schema_name}.`bronze_redemption_files`"
@@ -62,6 +60,10 @@ def _sample_rows_as_json(path: str, extension: str):
 def _member_rows(path: str):
     extension = Path(path).suffix.lower()
     if extension in {".xlsx", ".csv"}:
+        if not source_country:
+            raise ValueError(
+                "source_country is required only for optional workbook/CSV input."
+            )
         return _sample_rows_as_json(path, extension)
     if extension not in {"", ".txt", ".dat", ".psv"}:
         raise ValueError(
@@ -81,7 +83,8 @@ def _member_rows(path: str):
 
 
 def _write_once(df, table_name: str, app_id: str):
-    # Reuse the same batch_id on retries of a logical batch.
+    # Landing files are immutable. A stable application ID prevents the same
+    # dated file from being appended again if a job is retried.
     (
         df.write.format("delta")
         .mode("append")
@@ -91,13 +94,20 @@ def _write_once(df, table_name: str, app_id: str):
     )
 
 
+def _file_app_id(feed_name: str, path: str) -> str:
+    path_digest = sha256(path.encode("utf-8")).hexdigest()
+    return f"skypoints-{feed_name}-{path_digest}"
+
+
 if profile_file_path:
+    extension = Path(profile_file_path).suffix.lower()
+    source_label = source_country if extension in {".xlsx", ".csv"} else "GLOBAL"
     members = (
         _member_rows(profile_file_path)
         .select(
             F.lit(batch_id).alias("batch_id"),
             F.col("source_file"),
-            F.lit(source_country).alias("source_country"),
+            F.lit(source_label).alias("source_country"),
             F.current_timestamp().alias("ingested_at"),
             F.col("raw_record").cast("string").alias("raw_record"),
         )
@@ -105,7 +115,7 @@ if profile_file_path:
     _write_once(
         members,
         member_table,
-        f"skypoints-members-{source_country}-{batch_id}",
+        _file_app_id("members", profile_file_path),
     )
 
 if redemption_file_path:
@@ -120,6 +130,10 @@ if redemption_file_path:
             F.col("value").cast("string").alias("raw_json"),
         )
     )
-    _write_once(redemptions, redemption_table, f"skypoints-redemptions-{batch_id}")
+    _write_once(
+        redemptions,
+        redemption_table,
+        _file_app_id("redemptions", redemption_file_path),
+    )
 
 print(f"Bronze ingestion completed for batch_id={batch_id}")

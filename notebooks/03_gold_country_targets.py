@@ -1,60 +1,79 @@
 # Databricks notebook source
-# Rebuild the country targets from the globally current Silver member records.
+# Publish members changed by this batch to configured country targets.
 
-from pyspark.sql import Window
+import re
+
+from delta.tables import DeltaTable
 from pyspark.sql import functions as F
 
 
 dbutils.widgets.text("catalog", "main", "Unity Catalog")
 dbutils.widgets.text("schema", "skypoints", "Schema")
+dbutils.widgets.text("batch_id", "", "Batch ID")
 catalog = dbutils.widgets.get("catalog").strip()
 schema = dbutils.widgets.get("schema").strip()
+batch_id = dbutils.widgets.get("batch_id").strip()
 
-if not catalog or not schema:
-    raise ValueError("Both catalog and schema parameters must be provided.")
+if not catalog or not schema or not batch_id:
+    raise ValueError("catalog, schema, and batch_id parameters must be provided.")
 
 schema_name = f"`{catalog}`.`{schema}`"
 members_table = f"{schema_name}.`silver_members`"
+config_table = f"{schema_name}.`country_target_config`"
 members = spark.table(members_table)
 
-latest_record = Window.partitionBy("member_business_key").orderBy(
-    F.col("source_updated_at").desc_nulls_last(),
-    F.col("ingested_at").desc_nulls_last(),
-    F.col("batch_id").desc_nulls_last(),
-    F.col("source_file").desc_nulls_last(),
+targets = (
+    spark.table(config_table)
+    .where(F.col("is_active"))
+    .select("country_code", "target_table")
+    .collect()
 )
-current_members = (
-    members.where(F.col("member_business_key").isNotNull())
-    .withColumn("_record_rank", F.row_number().over(latest_record))
-    .where(F.col("_record_rank") == 1)
-    .drop("_record_rank")
-)
+if not targets:
+    raise ValueError("No active country publication targets are configured.")
 
-country_targets = {
-    "IND": "members_india",
-    "USA": "members_usa",
-    "AUS": "members_australia",
-}
+for row in targets:
+    if not re.fullmatch(r"[A-Z]{2,5}", row["country_code"]):
+        raise ValueError(f"Unsafe country code in configuration: {row['country_code']}")
+    if not re.fullmatch(r"[a-z][a-z0-9_]*", row["target_table"]):
+        raise ValueError(f"Unsafe target table in configuration: {row['target_table']}")
 
-unsupported = current_members.where(
-    ~F.col("country_code").isin(*country_targets.keys())
-)
-if unsupported.limit(1).count():
-    display(unsupported.select("source_member_id", "country_code"))
-    raise ValueError("Current members contain unsupported country codes.")
+changed_members = members.where(F.col("batch_id") == batch_id)
+changed_keys = changed_members.select("member_business_key").distinct()
 
-# Full replacement also removes records from an old country after a member moves.
-for country_code, table_name in country_targets.items():
+for row in targets:
+    country_code = row["country_code"]
+    table_name = row["target_table"]
+    target_name = f"{catalog}.{schema}.{table_name}"
+    target = DeltaTable.forName(spark, target_name)
+
+    # Remove changed keys from every target first so a country move cannot
+    # leave the previous country copy behind.
     (
-        current_members.where(F.col("country_code") == country_code)
-        .write.format("delta")
-        .mode("overwrite")
-        .option("overwriteSchema", "true")
-        .saveAsTable(f"{catalog}.{schema}.{table_name}")
+        target.alias("target")
+        .merge(
+            changed_keys.alias("changed"),
+            "target.member_business_key = changed.member_business_key",
+        )
+        .whenMatchedDelete()
+        .execute()
+    )
+
+    country_changes = changed_members.where(
+        F.col("country_code") == country_code
+    )
+    (
+        target.alias("target")
+        .merge(
+            country_changes.alias("source"),
+            "target.member_business_key = source.member_business_key",
+        )
+        .whenMatchedUpdateAll()
+        .whenNotMatchedInsertAll()
+        .execute()
     )
 
 display(
-    current_members.groupBy("country_code")
-    .agg(F.count("*").alias("current_member_count"))
+    changed_members.groupBy("country_code")
+    .agg(F.count("*").alias("published_member_count"))
     .orderBy("country_code")
 )

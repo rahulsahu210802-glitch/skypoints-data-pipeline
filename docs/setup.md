@@ -25,12 +25,26 @@ CREATE SCHEMA IF NOT EXISTS skypoints;
 
 Run `sql/01_create_tables.sql` after selecting the catalog in your SQL editor. The Free Edition bundle defaults to the `workspace` catalog; change it in `databricks.yml` for another workspace.
 
-## 3. Upload sample inputs
+## 3. Generate and upload sample inputs
 
-Upload the member workbook/CSV files to the paths configured by `profile_ind_path`, `profile_usa_path`, and `profile_aus_path` in `databricks.yml`. Upload redemption JSON files to `redemption_file_path`. For a pipe-delimited production feed, set the corresponding profile path to a file or directory of text files.
+The committed fixtures can be regenerated deterministically:
 
-The pandas-based workbook/CSV reader is only intended for the small assessment samples. Do not use it to ingest production-sized data.
-XLSX sample ingestion requires `pandas` and `openpyxl` on the Databricks cluster; CSV sample ingestion requires `pandas`.
+```bash
+python tools/generate_sample_data.py
+```
+
+Upload:
+
+- `samples/members_20240115.psv` to
+  `/Volumes/workspace/skypoints/landing/members/members_20240115.psv`
+- `samples/redemptions_20240115.json` to
+  `/Volumes/workspace/skypoints/landing/redemptions/redemptions_20240115.json`
+
+The exact defaults are configured by `profile_file_path`,
+`redemption_file_path`, and the shared logical `batch_id` in `databricks.yml`.
+
+The production landing contract uses a new immutable, date-specific path for
+each delivery. Do not replace a file after it has been processed.
 
 ## 4. Databricks project deployment
 
@@ -41,4 +55,16 @@ databricks bundle validate --target dev
 databricks bundle deploy --target dev
 ```
 
-The bundle creates the `skypoints-daily-pipeline` job on serverless compute. Its project environment installs the pinned Excel dependency from `pyproject.toml`. The job ingests the three member feeds and redemption feed, processes Silver and Gold, and runs the quality checks. Use a batch-specific landing path or a new batch ID for each daily delivery; reuse a batch ID only when retrying that same delivery.
+The bundle creates the `skypoints-daily-pipeline` job on serverless compute. The
+job ingests one global member feed and one redemption feed, processes Silver
+and Gold, persists quality results, and runs the sample assertions. Its daily
+02:00 UTC schedule is deployed as `PAUSED`.
+
+For the first global-feed demonstration, use a clean assessment schema so data
+from the earlier workbook experiment cannot affect expected counts. Then rerun
+`sql/01_create_tables.sql`, deploy the bundle, and start one complete job run.
+
+For each real daily delivery, update the two bundle input paths and `batch_id`
+to the new delivery date before triggering the run. Reuse the same paths and
+batch ID when retrying that delivery; Bronze prevents duplicate appends while
+downstream tasks safely reprocess the same logical batch.

@@ -42,69 +42,63 @@ def _quality_count(check_name):
 
 
 checks = [
-    ("bronze_member_rows_for_batch", 9, _count(
+    ("bronze_member_rows_for_batch", 151, _count(
         bronze_members.where(F.col("batch_id") == batch_id)
     )),
-    ("bronze_ind_rows_for_batch", 3, _count(
+    ("bronze_global_rows_for_batch", 151, _count(
         bronze_members.where(
-            (F.col("batch_id") == batch_id) & (F.col("source_country") == "IND")
-        )
-    )),
-    ("bronze_usa_rows_for_batch", 3, _count(
-        bronze_members.where(
-            (F.col("batch_id") == batch_id) & (F.col("source_country") == "USA")
-        )
-    )),
-    ("bronze_aus_rows_for_batch", 3, _count(
-        bronze_members.where(
-            (F.col("batch_id") == batch_id) & (F.col("source_country") == "AUS")
+            (F.col("batch_id") == batch_id)
+            & (F.col("source_country") == "GLOBAL")
         )
     )),
     ("bronze_redemption_documents_for_batch", 1, _count(
         bronze_redemptions.where(F.col("batch_id") == batch_id)
     )),
-    ("valid_current_members", 8, _count(members)),
-    ("distinct_member_business_keys", 8, members.select(
+    ("valid_current_members", 150, _count(members)),
+    ("distinct_member_business_keys", 150, members.select(
         "member_business_key"
     ).distinct().count()),
-    ("member_rejections_for_batch", 1, _count(
+    ("member_rejections_for_batch", 0, _count(
         member_rejections.where(F.col("batch_id") == batch_id)
     )),
-    ("invalid_enrollment_rejections_for_batch", 1, _count(
-        member_rejections.where(
-            (F.col("batch_id") == batch_id)
-            & (F.col("rejection_reason") == "Invalid or missing enrollment date")
-        )
-    )),
-    ("members_with_unknown_age", 1, _count(
+    ("members_with_unknown_age", 0, _count(
         members.where(F.col("age").isNull())
     )),
-    ("stale_members", 8, _count(
+    ("stale_members", 150, _count(
         members.where(F.col("stale_member"))
     )),
     ("silver_redemption_transactions", 2, _count(redemptions)),
-    ("orphan_sample_redemptions", 2, _count(
+    ("joined_sample_redemptions", 2, _count(
+        redemption_view.where(F.col("member_name").isNotNull())
+    )),
+    ("orphan_sample_redemptions", 0, _count(
         redemption_view.where(F.col("member_name").isNull())
     )),
-    ("quality_checks_for_batch", 8, _count(
+    ("quality_checks_for_batch", 10, _count(
         quality_results.where(F.col("batch_id") == batch_id)
     )),
-    ("nonzero_quality_checks_for_batch", 1, _count(
+    ("nonzero_quality_checks_for_batch", 0, _count(
         quality_results.where(
             (F.col("batch_id") == batch_id)
             & (F.col("failed_row_count") > 0)
         )
     )),
-    ("reported_orphan_redemptions", 2, _quality_count(
+    ("reported_orphan_redemptions", 0, _quality_count(
         "redemptions_without_member"
     )),
-    ("gold_ind_members", 3, _count(
+    ("gold_ind_members", 30, _count(
         spark.table(f"{prefix}`members_india`")
     )),
-    ("gold_usa_members", 3, _count(
+    ("gold_usa_members", 30, _count(
         spark.table(f"{prefix}`members_usa`")
     )),
-    ("gold_aus_members", 2, _count(
+    ("gold_philippines_members", 30, _count(
+        spark.table(f"{prefix}`members_philippines`")
+    )),
+    ("gold_canada_members", 30, _count(
+        spark.table(f"{prefix}`members_canada`")
+    )),
+    ("gold_australia_members", 30, _count(
         spark.table(f"{prefix}`members_australia`")
     )),
 ]

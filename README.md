@@ -8,6 +8,7 @@ Databricks implementation for the Incubyte Data Engineer assessment.
 - **Silver:** normalize and validate member/transaction records; upsert the current record by member ID or transaction ID; quarantine rejected input.
 - **Gold:** publish current member records to country tables and expose a member-redemption view.
 - **Quality:** report duplicate, missing-key, unsupported-country, orphan-transaction, and Gold consistency checks.
+- **Sample validation:** assert the supplied assessment files produce the expected Bronze, Silver, rejection, redemption, and Gold counts.
 
 The supplied country workbooks/CSVs are small assessment samples. The Bronze notebook can read them through pandas and stores each row as JSON. This driver-side path is sample-only; production feeds should use distributed pipe-delimited text ingestion. Redemption JSON is read as whole text so pretty-printed documents remain intact.
 
@@ -22,7 +23,7 @@ The supplied country workbooks/CSVs are small assessment samples. The Bronze not
    databricks bundle deploy --target dev
    ```
 
-4. Run the `skypoints-daily-pipeline` job. It ingests the three country feeds and redemption JSON, then processes Silver, Gold, and quality checks.
+4. Run the `skypoints-daily-pipeline` job. It ingests the three country feeds and redemption JSON, processes Silver and Gold, runs quality checks, and fails if the assessment sample outputs differ from the expected results.
 
 For manual execution, run member ingestion once per country, redemption ingestion once, then run `02_silver_members.py` and `04_silver_redemptions.py` before `03_gold_country_targets.py` and `05_data_quality.py`. Reuse the same `batch_id` when retrying a batch.
 

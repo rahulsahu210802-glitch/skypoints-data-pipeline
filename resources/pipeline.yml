@@ -88,3 +88,13 @@ resources:
             base_parameters:
               catalog: ${var.catalog}
               schema: ${var.schema}
+        - task_key: sample_validation
+          depends_on:
+            - task_key: data_quality
+          environment_key: default
+          notebook_task:
+            notebook_path: ../tests/01_sample_pipeline_test.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              batch_id: "{{job.run_id}}"

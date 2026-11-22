@@ -22,10 +22,23 @@ members = spark.table(f"{prefix}`silver_members`")
 member_rejections = spark.table(f"{prefix}`member_rejections`")
 redemptions = spark.table(f"{prefix}`silver_redemptions`")
 redemption_view = spark.table(f"{prefix}`member_redemption_view`")
+quality_results = spark.table(f"{prefix}`quality_check_results`")
 
 
 def _count(frame):
     return frame.count()
+
+
+def _quality_count(check_name):
+    row = quality_results.where(
+        (F.col("batch_id") == batch_id)
+        & (F.col("check_name") == check_name)
+    ).select("failed_row_count").first()
+    if row is None:
+        raise AssertionError(
+            f"Missing persisted quality result for check '{check_name}'."
+        )
+    return row["failed_row_count"]
 
 
 checks = [
@@ -72,6 +85,18 @@ checks = [
     ("silver_redemption_transactions", 2, _count(redemptions)),
     ("orphan_sample_redemptions", 2, _count(
         redemption_view.where(F.col("member_name").isNull())
+    )),
+    ("quality_checks_for_batch", 8, _count(
+        quality_results.where(F.col("batch_id") == batch_id)
+    )),
+    ("nonzero_quality_checks_for_batch", 1, _count(
+        quality_results.where(
+            (F.col("batch_id") == batch_id)
+            & (F.col("failed_row_count") > 0)
+        )
+    )),
+    ("reported_orphan_redemptions", 2, _quality_count(
+        "redemptions_without_member"
     )),
     ("gold_ind_members", 3, _count(
         spark.table(f"{prefix}`members_india`")

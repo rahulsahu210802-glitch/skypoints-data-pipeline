@@ -76,3 +76,10 @@ CREATE TABLE IF NOT EXISTS skypoints.redemption_rejections (
   rejection_reason STRING NOT NULL,
   rejected_at TIMESTAMP NOT NULL
 ) USING DELTA;
+
+CREATE TABLE IF NOT EXISTS skypoints.quality_check_results (
+  batch_id STRING NOT NULL,
+  check_name STRING NOT NULL,
+  failed_row_count BIGINT NOT NULL,
+  checked_at TIMESTAMP NOT NULL
+) USING DELTA;

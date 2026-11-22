@@ -1,20 +1,24 @@
 # Databricks notebook source
 # Report failed-row counts for core member and redemption quality checks.
 
+from delta.tables import DeltaTable
 from pyspark.sql import functions as F
 
 
 dbutils.widgets.text("catalog", "main", "Unity Catalog")
 dbutils.widgets.text("schema", "skypoints", "Schema")
+dbutils.widgets.text("batch_id", "", "Batch ID")
 catalog = dbutils.widgets.get("catalog").strip()
 schema = dbutils.widgets.get("schema").strip()
+batch_id = dbutils.widgets.get("batch_id").strip()
 
-if not catalog or not schema:
-    raise ValueError("Both catalog and schema parameters must be provided.")
+if not catalog or not schema or not batch_id:
+    raise ValueError("catalog, schema, and batch_id parameters must be provided.")
 
 prefix = f"`{catalog}`.`{schema}`."
 members = spark.table(f"{prefix}`silver_members`")
 redemptions = spark.table(f"{prefix}`silver_redemptions`")
+results_table = f"{prefix}`quality_check_results`"
 
 country_tables = [
     spark.table(f"{prefix}`members_india`")
@@ -50,5 +54,24 @@ checks = [
     ).count()),
 ]
 
-results = spark.createDataFrame(checks, ["check_name", "failed_row_count"])
+results = (
+    spark.createDataFrame(checks, ["check_name", "failed_row_count"])
+    .withColumn("batch_id", F.lit(batch_id))
+    .withColumn("checked_at", F.current_timestamp())
+    .select("batch_id", "check_name", "failed_row_count", "checked_at")
+)
+
+(
+    DeltaTable.forName(spark, results_table.replace("`", ""))
+    .alias("target")
+    .merge(
+        results.alias("source"),
+        "target.batch_id = source.batch_id "
+        "AND target.check_name = source.check_name",
+    )
+    .whenMatchedUpdateAll()
+    .whenNotMatchedInsertAll()
+    .execute()
+)
+
 display(results.orderBy("check_name"))

@@ -119,16 +119,16 @@ if profile_file_path:
     )
 
 if redemption_file_path:
-    # wholetext keeps each pretty-printed JSON document together as one row.
+    # binaryFile guarantees one row per formatted JSON file on serverless.
     redemptions = (
-        spark.read.option("wholetext", "true").text(redemption_file_path)
-        .where(F.trim(F.col("value")) != "")
+        spark.read.format("binaryFile").load(redemption_file_path)
         .select(
             F.lit(batch_id).alias("batch_id"),
-            F.col("_metadata.file_path").alias("source_file"),
+            F.col("path").alias("source_file"),
             F.current_timestamp().alias("ingested_at"),
-            F.col("value").cast("string").alias("raw_json"),
+            F.col("content").cast("string").alias("raw_json"),
         )
+        .where(F.trim(F.col("raw_json")) != "")
     )
     _write_once(
         redemptions,

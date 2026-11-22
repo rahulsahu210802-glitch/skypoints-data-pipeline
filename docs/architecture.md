@@ -18,7 +18,9 @@ Upstream Source System
 
 Bad records never disappear. They are written to `member_rejections` with the original row and a reason.
 
-Malformed or invalid redemption records are written to `redemption_rejections`. Bronze reads JSON with whole-file mode so formatted multi-line documents are not split into unrelated text lines.
+Malformed or invalid redemption records are written to `redemption_rejections`.
+Bronze uses Spark's binary-file reader so each formatted multi-line JSON file
+becomes exactly one raw document instead of one row per line.
 
 ## Ordering and identity
 

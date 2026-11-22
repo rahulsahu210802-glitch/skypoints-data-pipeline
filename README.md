@@ -14,8 +14,8 @@ The primary assessment fixture is one global pipe-delimited file containing 150
 members across `USA`, `IND`, `PHIL`, `CAN`, and `AU`. It follows the upstream
 Source System contract in the PDF. The separate country workbooks are retained
 only as an optional schema-harmonization reference; they are not tasks in the
-primary workflow. Redemption JSON is read as whole text so the formatted sample
-document remains intact.
+primary workflow. Redemption JSON uses Spark's binary-file reader so each
+formatted file is retained as one Bronze document on serverless compute.
 
 See [docs/architecture.md](docs/architecture.md) for the production-scale ingestion, incremental processing, storage-layout, and quality-control design.
 See [docs/excel-adapter.md](docs/excel-adapter.md) for the optional workbook compatibility path.

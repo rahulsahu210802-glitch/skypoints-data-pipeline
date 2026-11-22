@@ -40,6 +40,7 @@ resources:
               catalog: ${var.catalog}
               schema: ${var.schema}
               batch_id: ${var.batch_id}
+              as_of_date: ${var.as_of_date}
         - task_key: silver_redemptions
           depends_on:
             - task_key: ingest_redemptions

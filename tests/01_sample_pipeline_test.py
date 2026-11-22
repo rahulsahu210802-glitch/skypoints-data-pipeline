@@ -24,6 +24,56 @@ redemptions = spark.table(f"{prefix}`silver_redemptions`")
 redemption_rejections = spark.table(f"{prefix}`redemption_rejections`")
 redemption_view = spark.table(f"{prefix}`member_redemption_view`")
 quality_results = spark.table(f"{prefix}`quality_check_results`")
+gold_india = spark.table(f"{prefix}`members_india`")
+gold_usa = spark.table(f"{prefix}`members_usa`")
+gold_philippines = spark.table(f"{prefix}`members_philippines`")
+gold_canada = spark.table(f"{prefix}`members_canada`")
+gold_australia = spark.table(f"{prefix}`members_australia`")
+
+scenarios = {
+    "20240115": {
+        "bronze_member_rows": 151,
+        "member_rejections": 0,
+        "rejection_reason_count": 0,
+        "stale_members": 150,
+        "non_stale_members": 0,
+        "redemption_rejections": 0,
+        "redemption_rejection_reason_count": 0,
+        "gold_india": 30,
+        "gold_australia": 30,
+        "moved_member_india": 0,
+        "moved_member_australia": 1,
+    },
+    "20240116": {
+        "bronze_member_rows": 156,
+        "member_rejections": 5,
+        "rejection_reason_count": 1,
+        "stale_members": 150,
+        "non_stale_members": 0,
+        "redemption_rejections": 3,
+        "redemption_rejection_reason_count": 1,
+        "gold_india": 30,
+        "gold_australia": 30,
+        "moved_member_india": 0,
+        "moved_member_australia": 1,
+    },
+    "20240117": {
+        "bronze_member_rows": 151,
+        "member_rejections": 0,
+        "rejection_reason_count": 0,
+        "stale_members": 140,
+        "non_stale_members": 10,
+        "redemption_rejections": 0,
+        "redemption_rejection_reason_count": 0,
+        "gold_india": 31,
+        "gold_australia": 29,
+        "moved_member_india": 1,
+        "moved_member_australia": 0,
+    },
+}
+expected = scenarios.get(batch_id)
+if expected is None:
+    raise ValueError(f"No sample-validation scenario exists for batch_id={batch_id}.")
 
 
 def _count(frame):
@@ -43,10 +93,10 @@ def _quality_count(check_name):
 
 
 checks = [
-    ("bronze_member_rows_for_batch", 156, _count(
+    ("bronze_member_rows_for_batch", expected["bronze_member_rows"], _count(
         bronze_members.where(F.col("batch_id") == batch_id)
     )),
-    ("bronze_global_rows_for_batch", 156, _count(
+    ("bronze_global_rows_for_batch", expected["bronze_member_rows"], _count(
         bronze_members.where(
             (F.col("batch_id") == batch_id)
             & (F.col("source_country") == "GLOBAL")
@@ -59,34 +109,34 @@ checks = [
     ("distinct_member_business_keys", 150, members.select(
         "member_business_key"
     ).distinct().count()),
-    ("member_rejections_for_batch", 5, _count(
+    ("member_rejections_for_batch", expected["member_rejections"], _count(
         member_rejections.where(F.col("batch_id") == batch_id)
     )),
-    ("missing_member_name_rejections", 1, _count(
+    ("missing_member_name_rejections", expected["rejection_reason_count"], _count(
         member_rejections.where(
             (F.col("batch_id") == batch_id)
             & (F.col("rejection_reason") == "Missing member name")
         )
     )),
-    ("missing_member_id_rejections", 1, _count(
+    ("missing_member_id_rejections", expected["rejection_reason_count"], _count(
         member_rejections.where(
             (F.col("batch_id") == batch_id)
             & (F.col("rejection_reason") == "Missing member ID")
         )
     )),
-    ("invalid_enrollment_rejections", 1, _count(
+    ("invalid_enrollment_rejections", expected["rejection_reason_count"], _count(
         member_rejections.where(
             (F.col("batch_id") == batch_id)
             & (F.col("rejection_reason") == "Invalid or missing enrollment date")
         )
     )),
-    ("invalid_tier_rejections", 1, _count(
+    ("invalid_tier_rejections", expected["rejection_reason_count"], _count(
         member_rejections.where(
             (F.col("batch_id") == batch_id)
             & (F.col("rejection_reason") == "Invalid tier code")
         )
     )),
-    ("unsupported_country_rejections", 1, _count(
+    ("unsupported_country_rejections", expected["rejection_reason_count"], _count(
         member_rejections.where(
             (F.col("batch_id") == batch_id)
             & (F.col("rejection_reason") == "Missing or unsupported country code")
@@ -95,26 +145,35 @@ checks = [
     ("members_with_unknown_age", 0, _count(
         members.where(F.col("age").isNull())
     )),
-    ("stale_members", 150, _count(
+    ("stale_members", expected["stale_members"], _count(
         members.where(F.col("stale_member"))
     )),
+    ("non_stale_members", expected["non_stale_members"], _count(
+        members.where(~F.col("stale_member"))
+    )),
+    ("moved_member_in_silver_india", expected["moved_member_india"], _count(
+        members.where(
+            (F.col("source_member_id") == "2256")
+            & (F.col("country_code") == "IND")
+        )
+    )),
     ("silver_redemption_transactions", 9, _count(redemptions)),
-    ("redemption_rejections_for_batch", 3, _count(
+    ("redemption_rejections_for_batch", expected["redemption_rejections"], _count(
         redemption_rejections.where(F.col("batch_id") == batch_id)
     )),
-    ("negative_miles_rejections", 1, _count(
+    ("negative_miles_rejections", expected["redemption_rejection_reason_count"], _count(
         redemption_rejections.where(
             (F.col("batch_id") == batch_id)
             & (F.col("rejection_reason") == "Miles redeemed cannot be negative")
         )
     )),
-    ("future_transaction_rejections", 1, _count(
+    ("future_transaction_rejections", expected["redemption_rejection_reason_count"], _count(
         redemption_rejections.where(
             (F.col("batch_id") == batch_id)
             & (F.col("rejection_reason") == "Transaction date is after feed date")
         )
     )),
-    ("missing_transaction_id_rejections", 1, _count(
+    ("missing_transaction_id_rejections", expected["redemption_rejection_reason_count"], _count(
         redemption_rejections.where(
             (F.col("batch_id") == batch_id)
             & (F.col("rejection_reason") == "Missing transaction ID")
@@ -138,20 +197,16 @@ checks = [
     ("reported_orphan_redemptions", 0, _quality_count(
         "redemptions_without_member"
     )),
-    ("gold_ind_members", 30, _count(
-        spark.table(f"{prefix}`members_india`")
+    ("gold_ind_members", expected["gold_india"], _count(gold_india)),
+    ("gold_usa_members", 30, _count(gold_usa)),
+    ("gold_philippines_members", 30, _count(gold_philippines)),
+    ("gold_canada_members", 30, _count(gold_canada)),
+    ("gold_australia_members", expected["gold_australia"], _count(gold_australia)),
+    ("moved_member_gold_india", expected["moved_member_india"], _count(
+        gold_india.where(F.col("source_member_id") == "2256")
     )),
-    ("gold_usa_members", 30, _count(
-        spark.table(f"{prefix}`members_usa`")
-    )),
-    ("gold_philippines_members", 30, _count(
-        spark.table(f"{prefix}`members_philippines`")
-    )),
-    ("gold_canada_members", 30, _count(
-        spark.table(f"{prefix}`members_canada`")
-    )),
-    ("gold_australia_members", 30, _count(
-        spark.table(f"{prefix}`members_australia`")
+    ("moved_member_gold_australia", expected["moved_member_australia"], _count(
+        gold_australia.where(F.col("source_member_id") == "2256")
     )),
 ]
 

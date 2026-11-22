@@ -10,6 +10,8 @@ MEMBER_FILE = SAMPLES / "members_20240115.psv"
 REDEMPTION_FILE = SAMPLES / "redemptions_20240115.json"
 NEGATIVE_MEMBER_FILE = SAMPLES / "members_20240116.psv"
 NEGATIVE_REDEMPTION_FILE = SAMPLES / "redemptions_20240116.json"
+MOVEMENT_MEMBER_FILE = SAMPLES / "members_20240117.psv"
+MOVEMENT_REDEMPTION_FILE = SAMPLES / "redemptions_20240117.json"
 
 COUNTRIES = (
     ("USA", "CA", "90210"),
@@ -67,7 +69,15 @@ def _detail(
     )
 
 
-def build_members(*, include_invalid: bool = False) -> list[str]:
+def build_members(
+    *,
+    include_invalid: bool = False,
+    move_jacob_to_india: bool = False,
+    recent_member_count: int = 0,
+) -> list[str]:
+    jacob_country = "IND" if move_jacob_to_india else "AU"
+    jacob_state = "TN" if move_jacob_to_india else "VIC"
+    jacob_post_code = "60001" if move_jacob_to_india else "3000"
     rows = [
         "|H|Member_Name|Member_Id|Enrollment_Date|Last_Flight_Date|"
         "Tier_Code|Agent_Name|State|Country|Post_Code|DOB|Is_Active",
@@ -89,7 +99,7 @@ def build_members(*, include_invalid: bool = False) -> list[str]:
         ),
         _detail(
             "Jacob", "2256", "20101012", "20121013", "SLV", "Sam",
-            "VIC", "AU", "3000", "03051985", "A",
+            jacob_state, jacob_country, jacob_post_code, "03051985", "A",
         ),
     ]
 
@@ -101,7 +111,11 @@ def build_members(*, include_invalid: bool = False) -> list[str]:
         for country_member_number in range(1, 30):
             dob = base_dob + timedelta(days=member_number * 97)
             enrollment = base_enrollment + timedelta(days=member_number * 11)
-            flight = base_flight + timedelta(days=member_number)
+            flight = (
+                date(2024, 1, 1) + timedelta(days=member_number - 1)
+                if member_number <= recent_member_count
+                else base_flight + timedelta(days=member_number)
+            )
             rows.append(
                 _detail(
                     name=f"{country}_Member_{country_member_number:02d}",
@@ -284,16 +298,32 @@ def main() -> None:
         "\n".join(build_members(include_invalid=True)) + "\n",
         encoding="utf-8",
     )
+    MOVEMENT_MEMBER_FILE.write_text(
+        "\n".join(
+            build_members(
+                move_jacob_to_india=True,
+                recent_member_count=10,
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     _write_json(REDEMPTION_FILE, build_redemptions("20240115"))
     _write_json(
         NEGATIVE_REDEMPTION_FILE,
         build_redemptions("20240116", include_invalid=True),
+    )
+    _write_json(
+        MOVEMENT_REDEMPTION_FILE,
+        build_redemptions("20240117"),
     )
     for path in (
         MEMBER_FILE,
         REDEMPTION_FILE,
         NEGATIVE_MEMBER_FILE,
         NEGATIVE_REDEMPTION_FILE,
+        MOVEMENT_MEMBER_FILE,
+        MOVEMENT_REDEMPTION_FILE,
     ):
         print(f"Wrote {path}")
 

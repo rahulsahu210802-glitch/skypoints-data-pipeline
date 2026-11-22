@@ -12,6 +12,11 @@ Source System:
   valid members plus five deliberately invalid records.
 - `redemptions_20240116.json`: next daily feed containing the same nine valid
   transactions plus three deliberately invalid transactions.
+- `members_20240117.psv`: third daily delivery where member `2256` moves from
+  `AU` to `IND` and ten generated members receive flights within 90 days of the
+  fixed `2024-01-17` business date.
+- `redemptions_20240117.json`: third daily redemption feed containing the nine
+  valid transactions.
 
 The pipeline remains compatible with the PDF's original single-member JSON
 object.
@@ -26,3 +31,6 @@ delivers new dated files to the landing Volume each day.
 The second-day invalid records exercise missing-key, invalid-date, invalid-tier,
 unsupported-country, future-transaction-date, and negative-miles rejection
 paths without changing the expected valid Gold outputs.
+
+The third-day files prove latest-record-wins country movement and both outcomes
+of the stale-member derivation.

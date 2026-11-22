@@ -47,9 +47,17 @@ For the rejection demonstration, also upload:
 - `samples/redemptions_20240116.json` to
   `/Volumes/workspace/skypoints/landing/redemptions/redemptions_20240116.json`
 
+For the latest-record-wins and stale-member demonstration, upload:
+
+- `samples/members_20240117.psv` to
+  `/Volumes/workspace/skypoints/landing/members/members_20240117.psv`
+- `samples/redemptions_20240117.json` to
+  `/Volumes/workspace/skypoints/landing/redemptions/redemptions_20240117.json`
+
 The exact defaults are configured by `profile_file_path`,
 `redemption_file_path`, and the shared logical `batch_id` in `databricks.yml`.
-They currently select the `20240116` rejection-demonstration delivery.
+They currently select the `20240117` movement demonstration and its fixed
+`2024-01-17` business date.
 
 The production landing contract uses a new immutable, date-specific path for
 each delivery. Do not replace a file after it has been processed.

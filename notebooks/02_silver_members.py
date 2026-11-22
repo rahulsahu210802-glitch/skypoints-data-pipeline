@@ -62,6 +62,10 @@ bronze = bronze.withColumn(
 fields = F.split(F.col("raw_record"), r"\|")
 
 
+def _pipe_field(position):
+    return F.trim(F.try_element_at(fields, F.lit(position)))
+
+
 def _sample_field(name):
     return F.col("_sample").getField(name)
 
@@ -87,21 +91,21 @@ parsed = bronze.select(
     "batch_id", "source_file", "source_country", "ingested_at", "raw_record",
     "_is_sample_json",
     F.size(fields).alias("_field_count"),
-    F.trim(F.element_at(fields, 2)).alias("_pipe_member_name"),
-    F.trim(F.element_at(fields, 3)).alias("_pipe_member_id"),
-    F.trim(F.element_at(fields, 4)).alias("_pipe_enrollment_date"),
-    F.trim(F.element_at(fields, 5)).alias("_pipe_last_flight_date"),
-    F.trim(F.element_at(fields, 6)).alias("_pipe_tier"),
-    F.trim(F.element_at(fields, 7)).alias("_pipe_agent"),
-    F.trim(F.element_at(fields, 8)).alias("_pipe_state"),
-    F.when(F.size(fields) >= 12, F.trim(F.element_at(fields, 9)))
+    _pipe_field(2).alias("_pipe_member_name"),
+    _pipe_field(3).alias("_pipe_member_id"),
+    _pipe_field(4).alias("_pipe_enrollment_date"),
+    _pipe_field(5).alias("_pipe_last_flight_date"),
+    _pipe_field(6).alias("_pipe_tier"),
+    _pipe_field(7).alias("_pipe_agent"),
+    _pipe_field(8).alias("_pipe_state"),
+    F.when(F.size(fields) >= 12, _pipe_field(9))
      .otherwise(F.lit(None).cast("string")).alias("_pipe_post_code"),
-    F.when(F.size(fields) >= 12, F.trim(F.element_at(fields, 10)))
-     .otherwise(F.trim(F.element_at(fields, 9))).alias("_pipe_country"),
-    F.when(F.size(fields) >= 12, F.trim(F.element_at(fields, 11)))
-     .otherwise(F.trim(F.element_at(fields, 10))).alias("_pipe_dob"),
-    F.when(F.size(fields) >= 12, F.trim(F.element_at(fields, 12)))
-     .otherwise(F.trim(F.element_at(fields, 11))).alias("_pipe_active"),
+    F.when(F.size(fields) >= 12, _pipe_field(10))
+     .otherwise(_pipe_field(9)).alias("_pipe_country"),
+    F.when(F.size(fields) >= 12, _pipe_field(11))
+     .otherwise(_pipe_field(10)).alias("_pipe_dob"),
+    F.when(F.size(fields) >= 12, _pipe_field(12))
+     .otherwise(_pipe_field(11)).alias("_pipe_active"),
     F.coalesce(
         _sample_field("Unique ID"), _sample_field("ID")
     ).alias("_sample_member_id"),
@@ -162,7 +166,7 @@ normalized = parsed.select(
 
 detail = normalized.where(
     F.col("_is_sample_json")
-    | (F.element_at(F.split(F.col("raw_record"), r"\|"), 1) == "D")
+    | (_pipe_field(1) == "D")
 )
 
 validated = detail.withColumn(

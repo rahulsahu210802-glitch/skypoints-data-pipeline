@@ -12,6 +12,8 @@ Databricks implementation for the Incubyte Data Engineer assessment.
 
 The supplied country workbooks/CSVs are small assessment samples. The Bronze notebook can read them through pandas and stores each row as JSON. This driver-side path is sample-only; production feeds should use distributed pipe-delimited text ingestion. Redemption JSON is read as whole text so pretty-printed documents remain intact.
 
+See [docs/architecture.md](docs/architecture.md) for the production-scale ingestion, incremental processing, storage-layout, and quality-control design.
+
 ## Setup and execution
 
 1. Create the `skypoints` schema and tables using [sql/01_create_tables.sql](sql/01_create_tables.sql).

@@ -23,7 +23,7 @@ Use one schema for this assessment in the catalog selected in your SQL editor:
 CREATE SCHEMA IF NOT EXISTS skypoints;
 ```
 
-Run `sql/01_create_tables.sql` after selecting the catalog in your SQL editor. The default bundle catalog is `main`; change it in `databricks.yml` if needed.
+Run `sql/01_create_tables.sql` after selecting the catalog in your SQL editor. The Free Edition bundle defaults to the `workspace` catalog; change it in `databricks.yml` for another workspace.
 
 ## 3. Upload sample inputs
 
@@ -34,11 +34,11 @@ XLSX sample ingestion requires `pandas` and `openpyxl` on the Databricks cluster
 
 ## 4. Databricks project deployment
 
-Install and authenticate the Databricks CLI, set `cluster_id` to an existing cluster, then validate and deploy the bundle from this folder:
+Install and authenticate the Databricks CLI, then validate and deploy the serverless bundle from this folder:
 
 ```bash
-databricks bundle validate --target dev --var="cluster_id=<your-cluster-id>"
-databricks bundle deploy --target dev --var="cluster_id=<your-cluster-id>"
+databricks bundle validate --target dev
+databricks bundle deploy --target dev
 ```
 
-The bundle creates the `skypoints-daily-pipeline` job. It ingests the three member feeds and redemption feed, processes Silver and Gold, and runs the quality checks. Use a batch-specific landing path or a new batch ID for each daily delivery; reuse a batch ID only when retrying that same delivery.
+The bundle creates the `skypoints-daily-pipeline` job on serverless compute. Its project environment installs the pinned Excel dependency from `pyproject.toml`. The job ingests the three member feeds and redemption feed, processes Silver and Gold, and runs the quality checks. Use a batch-specific landing path or a new batch ID for each daily delivery; reuse a batch ID only when retrying that same delivery.

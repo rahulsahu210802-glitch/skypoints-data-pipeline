@@ -2,9 +2,13 @@ resources:
   jobs:
     skypoints_daily:
       name: skypoints-daily-pipeline
+      environments:
+        - environment_key: default
+          spec:
+            project_environment: ../pyproject.toml
       tasks:
         - task_key: ingest_ind
-          existing_cluster_id: ${var.cluster_id}
+          environment_key: default
           notebook_task:
             notebook_path: ../notebooks/01_bronze_ingest.py
             base_parameters:
@@ -14,7 +18,7 @@ resources:
               source_country: IND
               batch_id: "{{job.run_id}}"
         - task_key: ingest_usa
-          existing_cluster_id: ${var.cluster_id}
+          environment_key: default
           notebook_task:
             notebook_path: ../notebooks/01_bronze_ingest.py
             base_parameters:
@@ -24,7 +28,7 @@ resources:
               source_country: USA
               batch_id: "{{job.run_id}}"
         - task_key: ingest_aus
-          existing_cluster_id: ${var.cluster_id}
+          environment_key: default
           notebook_task:
             notebook_path: ../notebooks/01_bronze_ingest.py
             base_parameters:
@@ -34,7 +38,7 @@ resources:
               source_country: AUS
               batch_id: "{{job.run_id}}"
         - task_key: ingest_redemptions
-          existing_cluster_id: ${var.cluster_id}
+          environment_key: default
           notebook_task:
             notebook_path: ../notebooks/01_bronze_ingest.py
             base_parameters:
@@ -48,7 +52,7 @@ resources:
             - task_key: ingest_usa
             - task_key: ingest_aus
             - task_key: ingest_redemptions
-          existing_cluster_id: ${var.cluster_id}
+          environment_key: default
           notebook_task:
             notebook_path: ../notebooks/02_silver_members.py
             base_parameters:
@@ -58,7 +62,7 @@ resources:
         - task_key: silver_redemptions
           depends_on:
             - task_key: ingest_redemptions
-          existing_cluster_id: ${var.cluster_id}
+          environment_key: default
           notebook_task:
             notebook_path: ../notebooks/04_silver_redemptions.py
             base_parameters:
@@ -68,7 +72,7 @@ resources:
         - task_key: gold_members
           depends_on:
             - task_key: silver_members
-          existing_cluster_id: ${var.cluster_id}
+          environment_key: default
           notebook_task:
             notebook_path: ../notebooks/03_gold_country_targets.py
             base_parameters:
@@ -78,7 +82,7 @@ resources:
           depends_on:
             - task_key: gold_members
             - task_key: silver_redemptions
-          existing_cluster_id: ${var.cluster_id}
+          environment_key: default
           notebook_task:
             notebook_path: ../notebooks/05_data_quality.py
             base_parameters:

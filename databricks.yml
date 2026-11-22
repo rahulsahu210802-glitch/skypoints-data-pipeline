@@ -7,24 +7,22 @@ include:
 variables:
   catalog:
     description: Unity Catalog name that will contain the assessment schema.
-    default: main
+    default: workspace
   schema:
     description: Schema that will contain the pipeline tables.
     default: skypoints
-  cluster_id:
-    description: Existing Databricks cluster ID used by the assessment workflow.
   profile_ind_path:
     description: IND daily member file or folder path in a Unity Catalog Volume.
-    default: /Volumes/main/skypoints/landing/members/IND.xlsx
+    default: /Volumes/workspace/skypoints/landing/members/IND.xlsx
   profile_usa_path:
     description: USA daily member file or folder path in a Unity Catalog Volume.
-    default: /Volumes/main/skypoints/landing/members/USA.xlsx
+    default: /Volumes/workspace/skypoints/landing/members/USA.xlsx
   profile_aus_path:
     description: AUS daily member file or folder path in a Unity Catalog Volume.
-    default: /Volumes/main/skypoints/landing/members/AUS.xlsx
+    default: /Volumes/workspace/skypoints/landing/members/AUS.xlsx
   redemption_file_path:
     description: Daily redemption JSON file or folder path in a Unity Catalog Volume.
-    default: /Volumes/main/skypoints/landing/redemptions/
+    default: /Volumes/workspace/skypoints/landing/redemptions/
 
 targets:
   dev:

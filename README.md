@@ -15,11 +15,11 @@ The supplied country workbooks/CSVs are small assessment samples. The Bronze not
 
 1. Create the `skypoints` schema and tables using [sql/01_create_tables.sql](sql/01_create_tables.sql).
 2. Upload each member sample to the matching Unity Catalog Volume path and the redemption JSON file(s) to the redemption landing path. The default paths are in `databricks.yml`.
-3. Configure a Databricks cluster ID and validate/deploy the bundle:
+3. Validate and deploy the bundle. The workflow uses Free Edition-compatible serverless compute and installs its Python dependencies from `pyproject.toml`:
 
    ```bash
-   databricks bundle validate --target dev --var="cluster_id=<your-cluster-id>"
-   databricks bundle deploy --target dev --var="cluster_id=<your-cluster-id>"
+   databricks bundle validate --target dev
+   databricks bundle deploy --target dev
    ```
 
 4. Run the `skypoints-daily-pipeline` job. It ingests the three country feeds and redemption JSON, then processes Silver, Gold, and quality checks.
@@ -33,4 +33,4 @@ For manual execution, run member ingestion once per country, redemption ingestio
 - The sample feed has no reliable source-update timestamp. Until one is supplied, Silver uses ingestion time as the latest-record ordering fallback. Late-arriving old records therefore cannot be reliably ordered by business update time.
 - `as_of_date` defaults to the processing date and can be overridden for reproducible age and stale-member calculations. A member is stale only when the last flight was more than 90 days before that date.
 - Silver supports both observed pipe layouts (with or without the Post Code field) and the supplied CSV/XLSX sample column names; confirm the production layout before deployment.
-- The notebooks use Spark's `try_to_timestamp`; use a Databricks Runtime based on Spark 3.5 or later. The bundled job is manually triggered; configure a schedule only after agreeing on delivery timing and landing-path conventions.
+- The notebooks use Spark's `try_to_timestamp`. The serverless project environment is pinned in `pyproject.toml`. The bundled job is manually triggered; configure a schedule only after agreeing on delivery timing and landing-path conventions.

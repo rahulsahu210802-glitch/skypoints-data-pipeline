@@ -28,7 +28,8 @@ For manual execution, run member ingestion once per country, redemption ingestio
 
 ## Important assumptions
 
-- Member IDs and transaction IDs are globally unique. Country is not part of the member business key, so a country change replaces the current member record and removes the member from the old Gold table.
+- Production member IDs and transaction IDs are globally unique. Pipe-feed members therefore use `source_member_id` as the business key so a country change replaces the current record and removes it from the old Gold table. The supplied workbooks reuse IDs `1` through `3` for different people across countries, so sample workbook rows use `country_code:source_member_id` to avoid collapsing unrelated members.
+- A redemption feed can join automatically only to globally keyed production members. The country-scoped workbook samples need a global member identifier, or country in the redemption feed, before that relationship is unambiguous.
 - The sample feed has no reliable source-update timestamp. Until one is supplied, Silver uses ingestion time as the latest-record ordering fallback. Late-arriving old records therefore cannot be reliably ordered by business update time.
 - `as_of_date` defaults to the processing date and can be overridden for reproducible age and stale-member calculations. A member is stale only when the last flight was more than 90 days before that date.
 - Silver supports both observed pipe layouts (with or without the Post Code field) and the supplied CSV/XLSX sample column names; confirm the production layout before deployment.

@@ -228,7 +228,10 @@ if rejections.limit(1).count():
 valid_members = (
     validated.where(F.col("rejection_reason").isNull())
     .select(
-        F.col("source_member_id").alias("member_business_key"),
+        F.when(
+            F.col("_is_sample_json"),
+            F.concat_ws(":", F.col("country_code"), F.col("source_member_id")),
+        ).otherwise(F.col("source_member_id")).alias("member_business_key"),
         "source_member_id", "member_name", "tier_code", "date_of_birth",
         "enrollment_date", "last_flight_date", "country_code", "member_type",
         "agent_name", "state", "post_code", "active_flag",
@@ -244,7 +247,7 @@ valid_members = (
     )
 )
 
-latest_in_batch = Window.partitionBy("source_member_id").orderBy(
+latest_in_batch = Window.partitionBy("member_business_key").orderBy(
     F.col("ingested_at").desc_nulls_last(),
     F.col("batch_id").desc(),
     F.col("source_file").desc(),
@@ -260,7 +263,7 @@ valid_members = (
     .alias("target")
     .merge(
         valid_members.alias("source"),
-        "target.source_member_id = source.source_member_id",
+        "target.member_business_key = source.member_business_key",
     )
     .whenMatchedUpdateAll(
         condition=(

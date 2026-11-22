@@ -21,7 +21,9 @@ Malformed or invalid redemption records are written to `redemption_rejections`. 
 
 ## Ordering and identity
 
-The member key is `source_member_id` across countries so that a country move replaces the prior country assignment. The source does not currently provide a business update timestamp; ingestion time is therefore only a fallback ordering signal. A source update timestamp or sequence is required to correctly order late-arriving records.
+Production pipe-feed members use `source_member_id` across countries so a country move replaces the prior country assignment. The supplied workbooks reuse IDs `1` through `3` for different people, so workbook rows use `country_code:source_member_id` as their assessment-only business key. Those workbook rows cannot be joined unambiguously to redemption data unless the source provides a global member identifier or includes country in the redemption feed.
+
+The source does not currently provide a business update timestamp; ingestion time is therefore only a fallback ordering signal. A source update timestamp or sequence is required to correctly order late-arriving records.
 
 The Silver member parser accepts the sample detail row with 11 fields and the PDF-described variant with a Post Code field (12 fields).
 

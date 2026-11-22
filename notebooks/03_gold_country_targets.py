@@ -17,14 +17,14 @@ schema_name = f"`{catalog}`.`{schema}`"
 members_table = f"{schema_name}.`silver_members`"
 members = spark.table(members_table)
 
-latest_record = Window.partitionBy("source_member_id").orderBy(
+latest_record = Window.partitionBy("member_business_key").orderBy(
     F.col("source_updated_at").desc_nulls_last(),
     F.col("ingested_at").desc_nulls_last(),
     F.col("batch_id").desc_nulls_last(),
     F.col("source_file").desc_nulls_last(),
 )
 current_members = (
-    members.where(F.col("source_member_id").isNotNull())
+    members.where(F.col("member_business_key").isNotNull())
     .withColumn("_record_rank", F.row_number().over(latest_record))
     .where(F.col("_record_rank") == 1)
     .drop("_record_rank")

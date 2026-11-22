@@ -189,6 +189,7 @@ spark.sql(f"""
     FROM {silver_table} r
     LEFT JOIN {schema_name}.`silver_members` m
       ON r.source_member_id = m.source_member_id
+     AND m.member_business_key = m.source_member_id
 """)
 
 metrics = [

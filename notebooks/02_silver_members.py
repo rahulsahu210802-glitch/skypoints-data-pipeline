@@ -1,22 +1,11 @@
 # Databricks notebook source
-# Parse and standardize pipe-delimited member records from the Bronze layer.
-#
-# Assessment sample layout:
-# D|Member_Name|Member_Id|Enrollment_Date|Last_Flight_Date|Tier_Code|
-# Agent_Name|State|Country|DOB|Is_Active
-#
-# The PDF field specification mentions Post Code, but the sample header and
-# detail rows omit it. This notebook follows the sample layout. Confirm the
-# production feed layout before adding Post Code.
-#
-# Assumption: source_member_id is globally unique across countries.
+# Normalize pipe-delimited production records and the assessment CSV/XLSX samples.
 
+from pyspark.sql import Window
 from pyspark.sql import functions as F
+from pyspark.sql.types import StringType, StructField, StructType
+from delta.tables import DeltaTable
 
-
-# ---------------------------------------------------------------------------
-# Parameters
-# ---------------------------------------------------------------------------
 
 dbutils.widgets.text("catalog", "main", "Unity Catalog")
 dbutils.widgets.text("schema", "skypoints", "Schema")
@@ -42,154 +31,252 @@ as_of_date = (
     else F.current_date()
 )
 
-
-# ---------------------------------------------------------------------------
-# Read Bronze records and isolate detail rows
-# ---------------------------------------------------------------------------
+# Excel/CSV sample rows are retained as JSON in Bronze. The pipe feed remains
+# the production format and is parsed by its documented positional layout.
+sample_schema = StructType([
+    StructField(name, StringType(), True)
+    for name in (
+        "Unique ID", "Member Name", "Tier Type", "Date of Birth",
+        "Date of Enrollment", "Date of Flight", "ID", "Name", "DOB",
+        "TierCode", "EnrollmentDate", "Individual or Corporate",
+        "Flight Date", "FlightDate",
+    )
+])
 
 bronze = spark.table(bronze_table)
-
 if batch_id:
     bronze = bronze.where(F.col("batch_id") == batch_id)
 
-detail = bronze.where(
-    F.element_at(F.split(F.col("raw_record"), r"\|"), 1) == "D"
+bronze = bronze.withColumn(
+    "_is_sample_json",
+    F.trim(F.col("raw_record")).startswith("{"),
+).withColumn(
+    "_sample",
+    F.from_json(
+        F.col("raw_record"),
+        sample_schema,
+        {"primitivesAsString": "true"},
+    ),
 )
+
 fields = F.split(F.col("raw_record"), r"\|")
 
-parsed = detail.select(
-    "batch_id",
-    "source_file",
-    "source_country",
-    "ingested_at",
-    "raw_record",
-    F.trim(F.element_at(fields, 2)).alias("member_name"),
-    F.trim(F.element_at(fields, 3)).alias("source_member_id"),
-    F.to_date(F.trim(F.element_at(fields, 4)), "yyyyMMdd").alias("enrollment_date"),
-    F.to_date(F.trim(F.element_at(fields, 5)), "yyyyMMdd").alias("last_flight_date"),
-    F.upper(F.trim(F.element_at(fields, 6))).alias("tier_code"),
-    F.trim(F.element_at(fields, 7)).alias("agent_name"),
-    F.upper(F.trim(F.element_at(fields, 8))).alias("state"),
-    F.upper(F.trim(F.element_at(fields, 9))).alias("country_code"),
-    F.to_date(F.trim(F.element_at(fields, 10)), "MMddyyyy").alias("date_of_birth"),
-    F.upper(F.trim(F.element_at(fields, 11))).alias("active_flag"),
+
+def _sample_field(name):
+    return F.col("_sample").getField(name)
+
+
+def _date(value):
+    text = F.trim(value.cast("string"))
+    compact = F.lpad(text, 8, "0")
+    formats = (
+        (text, "yyyyMMdd"),
+        (compact, "MMddyyyy"),
+        (text, "yyyy-MM-dd"),
+        (text, "yyyy-MM-dd HH:mm:ss"),
+        (text, "M/d/yyyy"),
+        (text, "MM/dd/yyyy"),
+    )
+    return F.coalesce(*[
+        F.try_to_timestamp(candidate, F.lit(pattern)).cast("date")
+        for candidate, pattern in formats
+    ])
+
+
+parsed = bronze.select(
+    "batch_id", "source_file", "source_country", "ingested_at", "raw_record",
+    "_is_sample_json",
     F.size(fields).alias("_field_count"),
+    F.trim(F.element_at(fields, 2)).alias("_pipe_member_name"),
+    F.trim(F.element_at(fields, 3)).alias("_pipe_member_id"),
+    F.trim(F.element_at(fields, 4)).alias("_pipe_enrollment_date"),
+    F.trim(F.element_at(fields, 5)).alias("_pipe_last_flight_date"),
+    F.trim(F.element_at(fields, 6)).alias("_pipe_tier"),
+    F.trim(F.element_at(fields, 7)).alias("_pipe_agent"),
+    F.trim(F.element_at(fields, 8)).alias("_pipe_state"),
+    F.when(F.size(fields) >= 12, F.trim(F.element_at(fields, 9)))
+     .otherwise(F.lit(None).cast("string")).alias("_pipe_post_code"),
+    F.when(F.size(fields) >= 12, F.trim(F.element_at(fields, 10)))
+     .otherwise(F.trim(F.element_at(fields, 9))).alias("_pipe_country"),
+    F.when(F.size(fields) >= 12, F.trim(F.element_at(fields, 11)))
+     .otherwise(F.trim(F.element_at(fields, 10))).alias("_pipe_dob"),
+    F.when(F.size(fields) >= 12, F.trim(F.element_at(fields, 12)))
+     .otherwise(F.trim(F.element_at(fields, 11))).alias("_pipe_active"),
+    F.coalesce(
+        _sample_field("Unique ID"), _sample_field("ID")
+    ).alias("_sample_member_id"),
+    F.coalesce(
+        _sample_field("Member Name"), _sample_field("Name")
+    ).alias("_sample_member_name"),
+    F.coalesce(
+        _sample_field("Tier Type"), _sample_field("TierCode")
+    ).alias("_sample_tier"),
+    F.coalesce(
+        _sample_field("Date of Birth"), _sample_field("DOB")
+    ).alias("_sample_dob"),
+    F.coalesce(
+        _sample_field("Date of Enrollment"), _sample_field("EnrollmentDate")
+    ).alias("_sample_enrollment_date"),
+    F.coalesce(
+        _sample_field("Date of Flight"),
+        _sample_field("Flight Date"),
+        _sample_field("FlightDate"),
+    ).alias("_sample_last_flight_date"),
+    _sample_field("Individual or Corporate").alias("_sample_member_type"),
 )
 
+normalized = parsed.select(
+    "batch_id", "source_file", "source_country", "ingested_at", "raw_record",
+    "_is_sample_json", "_field_count",
+    F.when(F.col("_is_sample_json"), F.trim(F.col("_sample_member_id")))
+     .otherwise(F.col("_pipe_member_id")).alias("source_member_id"),
+    F.when(F.col("_is_sample_json"), F.trim(F.col("_sample_member_name")))
+     .otherwise(F.col("_pipe_member_name")).alias("member_name"),
+    F.when(F.col("_is_sample_json"), F.upper(F.trim(F.col("_sample_tier"))))
+     .otherwise(F.upper(F.col("_pipe_tier"))).alias("tier_code"),
+    F.when(F.col("_is_sample_json"), _date(F.col("_sample_dob")))
+     .otherwise(_date(F.col("_pipe_dob"))).alias("date_of_birth"),
+    F.when(F.col("_is_sample_json"), _date(F.col("_sample_enrollment_date")))
+     .otherwise(_date(F.col("_pipe_enrollment_date"))).alias("enrollment_date"),
+    F.when(F.col("_is_sample_json"), _date(F.col("_sample_last_flight_date")))
+     .otherwise(_date(F.col("_pipe_last_flight_date"))).alias("last_flight_date"),
+    F.when(
+        F.col("_is_sample_json"),
+        F.when(F.upper(F.col("source_country")) == "AU", "AUS")
+         .otherwise(F.upper(F.col("source_country"))),
+    ).otherwise(
+        F.when(F.upper(F.col("_pipe_country")) == "AU", "AUS")
+         .otherwise(F.upper(F.col("_pipe_country")))
+    ).alias("country_code"),
+    F.when(F.col("_is_sample_json"), F.upper(F.trim(F.col("_sample_member_type"))))
+     .otherwise(F.lit(None).cast("string")).alias("member_type"),
+    F.when(F.col("_is_sample_json"), F.lit(None).cast("string"))
+     .otherwise(F.trim(F.col("_pipe_agent"))).alias("agent_name"),
+    F.when(F.col("_is_sample_json"), F.lit(None).cast("string"))
+     .otherwise(F.upper(F.trim(F.col("_pipe_state")))).alias("state"),
+    F.when(F.col("_is_sample_json"), F.lit(None).cast("string"))
+     .otherwise(F.trim(F.col("_pipe_post_code"))).alias("post_code"),
+    F.when(F.col("_is_sample_json"), F.lit(None).cast("string"))
+     .otherwise(F.upper(F.trim(F.col("_pipe_active")))).alias("active_flag"),
+)
 
-# ---------------------------------------------------------------------------
-# Data-quality validation
-# ---------------------------------------------------------------------------
+detail = normalized.where(
+    F.col("_is_sample_json")
+    | (F.element_at(F.split(F.col("raw_record"), r"\|"), 1) == "D")
+)
 
-validated = parsed.withColumn(
+validated = detail.withColumn(
     "rejection_reason",
-    F.when(F.col("_field_count") < 11, "Malformed detail record: expected 11 fields")
-    .when(F.col("member_name").isNull() | (F.col("member_name") == ""), "Missing member name")
-    .when(F.length(F.col("member_name")) > 255, "Member name exceeds 255 characters")
+    F.when(
+        (~F.col("_is_sample_json")) & (~F.col("_field_count").isin(11, 12)),
+        "Malformed detail record: expected 11 or 12 fields",
+    )
     .when(F.col("source_member_id").isNull() | (F.col("source_member_id") == ""), "Missing member ID")
-    .when(F.length(F.col("source_member_id")) > 18, "Member ID exceeds 18 characters")
+    .when(F.col("member_name").isNull() | (F.col("member_name") == ""), "Missing member name")
     .when(F.col("enrollment_date").isNull(), "Invalid or missing enrollment date")
     .when(F.col("enrollment_date") > as_of_date, "Enrollment date is in the future")
     .when(
         F.col("date_of_birth").isNotNull() & (F.col("date_of_birth") > as_of_date),
-        "Date of birth is in the future"
+        "Date of birth is in the future",
     )
     .when(
         F.col("last_flight_date").isNotNull()
         & (F.col("last_flight_date") < F.col("enrollment_date")),
-        "Last flight date is before enrollment date"
+        "Last flight date is before enrollment date",
     )
     .when(
-        F.col("tier_code").isNotNull()
-        & (F.col("tier_code") != "")
-        & (~F.col("tier_code").isin("GLD", "SLV", "PLT")),
-        "Invalid tier code"
+        F.col("tier_code").isNull()
+        | (~F.col("tier_code").isin("GLD", "SLV", "PLT")),
+        "Invalid tier code",
     )
     .when(
-        F.col("country_code").isNull() | (F.col("country_code") == ""),
-        "Missing country code"
-    )
-    .when(~F.col("country_code").isin("IND", "USA", "AUS"), "Unsupported country code")
-    .when(
-        F.col("active_flag").isNotNull()
-        & (F.col("active_flag") != "")
-        & (~F.col("active_flag").isin("A", "I")),
-        "Invalid active-member flag"
+        F.col("country_code").isNull()
+        | (F.col("country_code") == "")
+        | (~F.col("country_code").isin("IND", "USA", "AUS")),
+        "Missing or unsupported country code",
     )
 )
 
 rejections = (
-    validated
-    .where(F.col("rejection_reason").isNotNull())
+    validated.where(F.col("rejection_reason").isNotNull())
     .select(
-        "batch_id",
-        "source_file",
-        "source_country",
-        "raw_record",
-        "rejection_reason",
-        F.current_timestamp().alias("rejected_at"),
+        "batch_id", "source_file", "source_country", "raw_record",
+        "rejection_reason", F.current_timestamp().alias("rejected_at"),
     )
+    .dropDuplicates(["batch_id", "source_file", "raw_record", "rejection_reason"])
 )
 
-# Append-only rejection history. A later enhancement can MERGE using a stable
-# source record ID to make rejection writes idempotent on batch retries.
-rejections.write.format("delta").mode("append").saveAsTable(
-    rejections_table.replace("`", "")
-)
-
-
-# ---------------------------------------------------------------------------
-# Build canonical Silver member records
-# ---------------------------------------------------------------------------
+if rejections.limit(1).count():
+    (
+        DeltaTable.forName(spark, rejections_table.replace("`", ""))
+        .alias("target")
+        .merge(
+            rejections.alias("source"),
+            "target.batch_id = source.batch_id "
+            "AND target.source_file = source.source_file "
+            "AND target.raw_record = source.raw_record "
+            "AND target.rejection_reason = source.rejection_reason",
+        )
+        .whenNotMatchedInsertAll()
+        .execute()
+    )
 
 valid_members = (
-    validated
-    .where(F.col("rejection_reason").isNull())
+    validated.where(F.col("rejection_reason").isNull())
     .select(
-        # Country is intentionally excluded from the global business key.
         F.col("source_member_id").alias("member_business_key"),
-        "source_member_id",
-        "member_name",
-        "tier_code",
-        "date_of_birth",
-        "enrollment_date",
-        "last_flight_date",
-        "country_code",
-        # The supplied sample feed has no member_type field.
-        F.lit(None).cast("string").alias("member_type"),
+        "source_member_id", "member_name", "tier_code", "date_of_birth",
+        "enrollment_date", "last_flight_date", "country_code", "member_type",
+        "agent_name", "state", "post_code", "active_flag",
         F.when(
             F.col("date_of_birth").isNotNull(),
-            F.floor(F.months_between(as_of_date, F.col("date_of_birth")) / 12)
+            F.floor(F.months_between(as_of_date, F.col("date_of_birth")) / 12),
         ).cast("int").alias("age"),
-        # Strictly greater than 90 days. Unknown flight dates remain NULL.
-        F.when(
-            F.col("last_flight_date").isNull(),
-            F.lit(None).cast("boolean")
-        ).otherwise(
-            F.datediff(as_of_date, F.col("last_flight_date")) > 90
-        ).alias("stale_member"),
-        # No source update timestamp exists in the assessment sample.
-        # Gold therefore falls back to ingested_at until source metadata exists.
+        F.when(F.col("last_flight_date").isNull(), F.lit(None).cast("boolean"))
+         .otherwise(F.datediff(as_of_date, F.col("last_flight_date")) > 90)
+         .alias("stale_member"),
         F.lit(None).cast("timestamp").alias("source_updated_at"),
-        "batch_id",
-        "source_file",
-        "ingested_at",
+        "batch_id", "source_file", "ingested_at",
     )
 )
 
-# Keep the output aligned with the current silver_members DDL. agent_name,
-# state and active_flag are parsed, but need DDL expansion before persistence.
-valid_members.write.format("delta").mode("append").saveAsTable(
-    silver_table.replace("`", "")
+latest_in_batch = Window.partitionBy("source_member_id").orderBy(
+    F.col("ingested_at").desc_nulls_last(),
+    F.col("batch_id").desc(),
+    F.col("source_file").desc(),
+)
+valid_members = (
+    valid_members.withColumn("_row_number", F.row_number().over(latest_in_batch))
+    .where(F.col("_row_number") == 1)
+    .drop("_row_number")
 )
 
-
-# ---------------------------------------------------------------------------
-# Execution metrics
-# ---------------------------------------------------------------------------
+(
+    DeltaTable.forName(spark, silver_table.replace("`", ""))
+    .alias("target")
+    .merge(
+        valid_members.alias("source"),
+        "target.source_member_id = source.source_member_id",
+    )
+    .whenMatchedUpdateAll(
+        condition=(
+            "("
+            "source.source_updated_at IS NOT NULL AND ("
+            "target.source_updated_at IS NULL "
+            "OR source.source_updated_at > target.source_updated_at "
+            "OR (source.source_updated_at = target.source_updated_at "
+            "AND source.ingested_at >= target.ingested_at)"
+            ")) OR (source.source_updated_at IS NULL "
+            "AND target.source_updated_at IS NULL "
+            "AND source.ingested_at >= target.ingested_at)"
+        )
+    )
+    .whenNotMatchedInsertAll()
+    .execute()
+)
 
 metrics = [
-    ("parsed_detail_rows", parsed.count()),
+    ("parsed_detail_rows", detail.count()),
     ("valid_member_rows", valid_members.count()),
     ("rejected_member_rows", rejections.count()),
 ]

@@ -1,43 +1,12 @@
 # Databricks notebook source
-# Parse the raw Bronze redemption JSON feed into one Silver row per transaction.
-#
-# Expected JSON document:
-# {
-#   "member_id": "223457",
-#   "feed_date": "20240115",
-#   "redemptions": [
-#     {
-#       "txn_id": "RX10091",
-#       "txn_date": "20240110",
-#       "partner": "AeroLink",
-#       "miles_redeemed": 12000,
-#       "status": "COMPLETED"
-#     }
-#   ]
-# }
-#
-# Bronze stores the original JSON document in raw_json. The Bronze ingestion
-# reader must use whole-file text ingestion for pretty-printed JSON documents,
-# or the source must deliver newline-delimited JSON (NDJSON).
-#
-# Required tables:
-#   bronze_redemption_files
-#   silver_redemptions
-#   redemption_rejections
+# Parse raw Bronze JSON documents, quarantine invalid transactions, and upsert
+# valid transactions by their globally unique transaction ID.
 
+from delta.tables import DeltaTable
+from pyspark.sql import Window
 from pyspark.sql import functions as F
-from pyspark.sql.types import (
-    ArrayType,
-    LongType,
-    StringType,
-    StructField,
-    StructType,
-)
+from pyspark.sql.types import ArrayType, LongType, StringType, StructField, StructType
 
-
-# ---------------------------------------------------------------------------
-# Parameters
-# ---------------------------------------------------------------------------
 
 dbutils.widgets.text("catalog", "main", "Unity Catalog")
 dbutils.widgets.text("schema", "skypoints", "Schema")
@@ -51,14 +20,9 @@ if not catalog or not schema:
     raise ValueError("Both catalog and schema parameters must be provided.")
 
 schema_name = f"`{catalog}`.`{schema}`"
-bronze_table = f"{catalog}.{schema}.bronze_redemption_files"
-silver_table = f"{catalog}.{schema}.silver_redemptions"
-rejections_table = f"{catalog}.{schema}.redemption_rejections"
-
-
-# ---------------------------------------------------------------------------
-# JSON schema
-# ---------------------------------------------------------------------------
+bronze_table = f"{schema_name}.`bronze_redemption_files`"
+silver_table = f"{schema_name}.`silver_redemptions`"
+rejections_table = f"{schema_name}.`redemption_rejections`"
 
 redemption_item_schema = StructType([
     StructField("txn_id", StringType(), True),
@@ -67,7 +31,6 @@ redemption_item_schema = StructType([
     StructField("miles_redeemed", LongType(), True),
     StructField("status", StringType(), True),
 ])
-
 feed_schema = StructType([
     StructField("member_id", StringType(), True),
     StructField("feed_date", StringType(), True),
@@ -75,121 +38,109 @@ feed_schema = StructType([
 ])
 
 
-# ---------------------------------------------------------------------------
-# Read Bronze and parse each raw JSON document
-# ---------------------------------------------------------------------------
+def _date(value):
+    return F.try_to_timestamp(value, F.lit("yyyyMMdd")).cast("date")
+
 
 bronze = spark.table(bronze_table)
-
 if batch_id:
     bronze = bronze.where(F.col("batch_id") == batch_id)
 
 parsed_documents = bronze.withColumn(
-    "_feed",
-    F.from_json(F.col("raw_json"), feed_schema)
-)
-
-# Keep document-level parse failures for quarantine.
-document_errors = (
-    parsed_documents
-    .where(F.col("_feed").isNull())
-    .select(
-        "batch_id",
-        "source_file",
-        F.col("raw_json").alias("raw_record"),
-        F.lit("Malformed JSON document or schema mismatch").alias("rejection_reason"),
-        F.current_timestamp().alias("rejected_at"),
+    "_feed", F.from_json(F.col("raw_json"), feed_schema)
+).withColumn(
+    "_document_rejection_reason",
+    F.when(F.col("_feed").isNull(), "Malformed JSON document or schema mismatch")
+    .when(
+        F.col("_feed.member_id").isNull() | (F.col("_feed.member_id") == ""),
+        "Missing member ID",
     )
+    .when(F.col("_feed.redemptions").isNull(), "Missing redemptions array"),
+)
+malformed_documents = parsed_documents.where(
+    F.col("_document_rejection_reason").isNotNull()
+).select(
+    "batch_id",
+    "source_file",
+    F.col("raw_json").alias("raw_record"),
+    F.col("_document_rejection_reason").alias("rejection_reason"),
+    F.current_timestamp().alias("rejected_at"),
 )
 
-# Explode the nested redemptions array into one row per transaction.
 flattened = (
-    parsed_documents
-    .where(F.col("_feed").isNotNull())
+    parsed_documents.where(F.col("_document_rejection_reason").isNull())
     .select(
-        "batch_id",
-        "source_file",
-        "ingested_at",
+        "batch_id", "source_file", "ingested_at", "raw_json",
         F.col("_feed.member_id").cast("string").alias("source_member_id"),
-        F.to_date(F.col("_feed.feed_date"), "yyyyMMdd").alias("feed_date"),
-        F.explode_outer(F.col("_feed.redemptions")).alias("redemption"),
-        F.col("raw_json"),
+        _date(F.col("_feed.feed_date")).alias("feed_date"),
+        F.explode(F.col("_feed.redemptions")).alias("_redemption"),
     )
     .select(
-        "batch_id",
-        "source_file",
-        "ingested_at",
-        "source_member_id",
-        "feed_date",
-        F.col("redemption.txn_id").cast("string").alias("transaction_id"),
-        F.to_date(F.col("redemption.txn_date"), "yyyyMMdd").alias("transaction_date"),
-        F.trim(F.col("redemption.partner")).alias("partner"),
-        F.col("redemption.miles_redeemed").cast("long").alias("miles_redeemed"),
-        F.upper(F.trim(F.col("redemption.status"))).alias("transaction_status"),
-        "raw_json",
+        "batch_id", "source_file", "ingested_at", "raw_json",
+        "source_member_id", "feed_date",
+        F.col("_redemption.txn_id").cast("string").alias("transaction_id"),
+        _date(F.col("_redemption.txn_date")).alias("transaction_date"),
+        F.trim(F.col("_redemption.partner")).alias("partner"),
+        F.col("_redemption.miles_redeemed").cast("long").alias("miles_redeemed"),
+        F.upper(F.trim(F.col("_redemption.status"))).alias("transaction_status"),
     )
 )
-
-
-# ---------------------------------------------------------------------------
-# Transaction-level validation
-# ---------------------------------------------------------------------------
 
 validated = flattened.withColumn(
     "rejection_reason",
     F.when(
         F.col("source_member_id").isNull() | (F.col("source_member_id") == ""),
-        "Missing member ID"
+        "Missing member ID",
     )
     .when(F.col("feed_date").isNull(), "Invalid or missing feed date")
     .when(
         F.col("transaction_id").isNull() | (F.col("transaction_id") == ""),
-        "Missing transaction ID"
+        "Missing transaction ID",
     )
     .when(F.col("transaction_date").isNull(), "Invalid or missing transaction date")
     .when(
-        F.col("feed_date").isNotNull()
-        & F.col("transaction_date").isNotNull()
-        & (F.col("transaction_date") > F.col("feed_date")),
-        "Transaction date is after feed date"
+        F.col("transaction_date") > F.col("feed_date"),
+        "Transaction date is after feed date",
     )
     .when(F.col("partner").isNull() | (F.col("partner") == ""), "Missing partner")
     .when(F.col("miles_redeemed").isNull(), "Missing or invalid miles redeemed")
     .when(F.col("miles_redeemed") < 0, "Miles redeemed cannot be negative")
     .when(
-        ~F.col("transaction_status").isin("COMPLETED", "PENDING", "FAILED", "CANCELLED"),
-        "Invalid transaction status"
+        F.col("transaction_status").isNull()
+        | (F.col("transaction_status") == ""),
+        "Missing transaction status",
     )
 )
 
-rejections = (
-    document_errors
-    .unionByName(
-        validated
-        .where(F.col("rejection_reason").isNotNull())
-        .select(
-            "batch_id",
-            "source_file",
-            F.col("raw_json").alias("raw_record"),
-            "rejection_reason",
-            F.current_timestamp().alias("rejected_at"),
+rejections = malformed_documents.unionByName(
+    validated.where(F.col("rejection_reason").isNotNull()).select(
+        "batch_id",
+        "source_file",
+        F.col("raw_json").alias("raw_record"),
+        "rejection_reason",
+        F.current_timestamp().alias("rejected_at"),
+    )
+).dropDuplicates(["batch_id", "source_file", "raw_record", "rejection_reason"])
+
+if rejections.limit(1).count():
+    (
+        DeltaTable.forName(spark, rejections_table.replace("`", ""))
+        .alias("target")
+        .merge(
+            rejections.alias("source"),
+            "target.batch_id = source.batch_id "
+            "AND target.source_file = source.source_file "
+            "AND target.raw_record = source.raw_record "
+            "AND target.rejection_reason = source.rejection_reason",
         )
+        .whenNotMatchedInsertAll()
+        .execute()
     )
-)
-
-# The DDL update will create this dedicated table. Keeping redemption rejects
-# separate from member rejects makes operational triage easier.
-if rejections.limit(1).count() > 0:
-    rejections.write.format("delta").mode("append").saveAsTable(rejections_table)
-
-
-# ---------------------------------------------------------------------------
-# Deduplicate and MERGE valid transactions
-# ---------------------------------------------------------------------------
 
 valid_transactions = validated.where(F.col("rejection_reason").isNull()).select(
     "transaction_id",
     "source_member_id",
+    "source_file",
     "transaction_date",
     "partner",
     "miles_redeemed",
@@ -199,53 +150,51 @@ valid_transactions = validated.where(F.col("rejection_reason").isNull()).select(
     "ingested_at",
 )
 
-# If the same transaction appears more than once in the current batch, retain
-# the most recently ingested copy. transaction_id is assumed globally unique.
-from pyspark.sql import Window
-
-transaction_window = Window.partitionBy("transaction_id").orderBy(
+latest_transaction = Window.partitionBy("transaction_id").orderBy(
     F.col("ingested_at").desc_nulls_last(),
-    F.col("batch_id").desc_nulls_last()
+    F.col("batch_id").desc(),
+    F.col("source_file").desc(),
+    F.col("transaction_date").desc(),
 )
-
-deduplicated = (
-    valid_transactions
-    .withColumn("_row_num", F.row_number().over(transaction_window))
-    .where(F.col("_row_num") == 1)
-    .drop("_row_num")
+valid_transactions = (
+    valid_transactions.withColumn("_row_number", F.row_number().over(latest_transaction))
+    .where(F.col("_row_number") == 1)
+    .drop("_row_number")
 )
-
-if not spark.catalog.tableExists(silver_table):
-    raise ValueError(
-        f"Target table {silver_table} does not exist. "
-        "Run sql/01_create_tables.sql after adding the redemption DDL."
-    )
-
-from delta.tables import DeltaTable
-
-target = DeltaTable.forName(spark, silver_table)
 
 (
-    target.alias("t")
+    DeltaTable.forName(spark, silver_table.replace("`", ""))
+    .alias("target")
     .merge(
-        deduplicated.alias("s"),
-        "t.transaction_id = s.transaction_id"
+        valid_transactions.alias("source"),
+        "target.transaction_id = source.transaction_id",
     )
-    .whenMatchedUpdateAll()
+    .whenMatchedUpdateAll(condition="source.ingested_at >= target.ingested_at")
     .whenNotMatchedInsertAll()
     .execute()
 )
 
-
-# ---------------------------------------------------------------------------
-# Execution metrics
-# ---------------------------------------------------------------------------
+spark.sql(f"""
+    CREATE OR REPLACE VIEW {schema_name}.`member_redemption_view` AS
+    SELECT
+        r.transaction_id,
+        r.transaction_date,
+        r.partner,
+        r.miles_redeemed,
+        r.transaction_status,
+        r.source_member_id,
+        m.member_name,
+        m.tier_code,
+        m.country_code
+    FROM {silver_table} r
+    LEFT JOIN {schema_name}.`silver_members` m
+      ON r.source_member_id = m.source_member_id
+""")
 
 metrics = [
     ("bronze_documents", parsed_documents.count()),
     ("flattened_transaction_rows", flattened.count()),
-    ("valid_unique_transactions", deduplicated.count()),
+    ("valid_unique_transactions", valid_transactions.count()),
     ("rejected_rows", rejections.count()),
 ]
-
 display(spark.createDataFrame(metrics, ["metric_name", "row_count"]))

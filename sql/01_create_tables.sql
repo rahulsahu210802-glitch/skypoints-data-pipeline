@@ -38,6 +38,15 @@ CREATE TABLE IF NOT EXISTS skypoints.silver_members (
   ingested_at TIMESTAMP NOT NULL
 ) USING DELTA;
 
+CREATE TABLE IF NOT EXISTS skypoints.members_india
+LIKE skypoints.silver_members;
+
+CREATE TABLE IF NOT EXISTS skypoints.members_usa
+LIKE skypoints.silver_members;
+
+CREATE TABLE IF NOT EXISTS skypoints.members_australia
+LIKE skypoints.silver_members;
+
 CREATE TABLE IF NOT EXISTS skypoints.member_rejections (
   batch_id STRING NOT NULL,
   source_file STRING NOT NULL,

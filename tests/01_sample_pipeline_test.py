@@ -67,8 +67,8 @@ checks = [
     ("stale_members", 150, _count(
         members.where(F.col("stale_member"))
     )),
-    ("silver_redemption_transactions", 2, _count(redemptions)),
-    ("joined_sample_redemptions", 2, _count(
+    ("silver_redemption_transactions", 9, _count(redemptions)),
+    ("joined_sample_redemptions", 9, _count(
         redemption_view.where(F.col("member_name").isNotNull())
     )),
     ("orphan_sample_redemptions", 0, _count(

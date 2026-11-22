@@ -36,6 +36,7 @@ feed_schema = StructType([
     StructField("feed_date", StringType(), True),
     StructField("redemptions", ArrayType(redemption_item_schema), True),
 ])
+feed_array_schema = ArrayType(feed_schema)
 
 
 def _date(value):
@@ -46,25 +47,61 @@ bronze = spark.table(bronze_table)
 if batch_id:
     bronze = bronze.where(F.col("batch_id") == batch_id)
 
-parsed_documents = bronze.withColumn(
-    "_feed", F.from_json(F.col("raw_json"), feed_schema)
+parsed_envelopes = (
+    bronze.withColumn(
+        "_feed_array",
+        F.from_json(F.col("raw_json"), feed_array_schema),
+    )
+    .withColumn(
+        "_single_feed",
+        F.from_json(F.col("raw_json"), feed_schema),
+    )
+    .withColumn(
+        "_feeds",
+        F.when(F.col("_feed_array").isNotNull(), F.col("_feed_array"))
+        .when(
+            F.col("_single_feed").isNotNull(),
+            F.array(F.col("_single_feed")),
+        ),
+    )
+)
+malformed_envelopes = parsed_envelopes.where(
+    F.col("_feeds").isNull()
+).select(
+    "batch_id",
+    "source_file",
+    F.col("raw_json").alias("raw_record"),
+    F.lit("Malformed JSON document or schema mismatch").alias("rejection_reason"),
+    F.current_timestamp().alias("rejected_at"),
+)
+
+parsed_documents = (
+    parsed_envelopes.where(F.col("_feeds").isNotNull())
+    .select(
+        "batch_id",
+        "source_file",
+        "ingested_at",
+        "raw_json",
+        F.explode(F.col("_feeds")).alias("_feed"),
+    )
 ).withColumn(
     "_document_rejection_reason",
-    F.when(F.col("_feed").isNull(), "Malformed JSON document or schema mismatch")
-    .when(
+    F.when(
         F.col("_feed.member_id").isNull() | (F.col("_feed.member_id") == ""),
         "Missing member ID",
     )
     .when(F.col("_feed.redemptions").isNull(), "Missing redemptions array"),
 )
-malformed_documents = parsed_documents.where(
-    F.col("_document_rejection_reason").isNotNull()
-).select(
-    "batch_id",
-    "source_file",
-    F.col("raw_json").alias("raw_record"),
-    F.col("_document_rejection_reason").alias("rejection_reason"),
-    F.current_timestamp().alias("rejected_at"),
+malformed_documents = malformed_envelopes.unionByName(
+    parsed_documents.where(
+        F.col("_document_rejection_reason").isNotNull()
+    ).select(
+        "batch_id",
+        "source_file",
+        F.col("raw_json").alias("raw_record"),
+        F.col("_document_rejection_reason").alias("rejection_reason"),
+        F.current_timestamp().alias("rejected_at"),
+    )
 )
 
 flattened = (
@@ -193,7 +230,8 @@ spark.sql(f"""
 """)
 
 metrics = [
-    ("bronze_documents", parsed_documents.count()),
+    ("bronze_documents", bronze.count()),
+    ("parsed_member_documents", parsed_documents.count()),
     ("flattened_transaction_rows", flattened.count()),
     ("valid_unique_transactions", valid_transactions.count()),
     ("rejected_rows", rejections.count()),

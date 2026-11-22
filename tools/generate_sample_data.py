@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+import json
 from pathlib import Path
 
 
@@ -110,27 +111,99 @@ def main() -> None:
     SAMPLES.mkdir(exist_ok=True)
     MEMBER_FILE.write_text("\n".join(build_members()) + "\n", encoding="utf-8")
     REDEMPTION_FILE.write_text(
-        """{
-  "member_id": "223457",
-  "feed_date": "20240115",
-  "redemptions": [
-    {
-      "txn_id": "RX10091",
-      "txn_date": "20240110",
-      "partner": "AeroLink",
-      "miles_redeemed": 12000,
-      "status": "COMPLETED"
-    },
-    {
-      "txn_id": "RX10092",
-      "txn_date": "20240113",
-      "partner": "SkyPoints",
-      "miles_redeemed": 5000,
-      "status": "PENDING"
-    }
-  ]
-}
-""",
+        json.dumps(
+            [
+                {
+                    "member_id": "223457",
+                    "feed_date": "20240115",
+                    "redemptions": [
+                        {
+                            "txn_id": "RX10091",
+                            "txn_date": "20240110",
+                            "partner": "AeroLink",
+                            "miles_redeemed": 12000,
+                            "status": "COMPLETED",
+                        },
+                        {
+                            "txn_id": "RX10092",
+                            "txn_date": "20240113",
+                            "partner": "SkyPoints",
+                            "miles_redeemed": 5000,
+                            "status": "PENDING",
+                        },
+                    ],
+                },
+                {
+                    "member_id": "223458",
+                    "feed_date": "20240115",
+                    "redemptions": [
+                        {
+                            "txn_id": "RX10093",
+                            "txn_date": "20240108",
+                            "partner": "AeroLink",
+                            "miles_redeemed": 8000,
+                            "status": "COMPLETED",
+                        },
+                        {
+                            "txn_id": "RX10094",
+                            "txn_date": "20240111",
+                            "partner": "CloudMiles",
+                            "miles_redeemed": 3500,
+                            "status": "COMPLETED",
+                        },
+                        {
+                            "txn_id": "RX10095",
+                            "txn_date": "20240114",
+                            "partner": "SkyPoints",
+                            "miles_redeemed": 2000,
+                            "status": "PENDING",
+                        },
+                    ],
+                },
+                {
+                    "member_id": "223459",
+                    "feed_date": "20240115",
+                    "redemptions": [
+                        {
+                            "txn_id": "RX10096",
+                            "txn_date": "20240109",
+                            "partner": "PacificAir",
+                            "miles_redeemed": 15000,
+                            "status": "COMPLETED",
+                        },
+                        {
+                            "txn_id": "RX10097",
+                            "txn_date": "20240112",
+                            "partner": "SkyPoints",
+                            "miles_redeemed": 4500,
+                            "status": "CANCELLED",
+                        },
+                    ],
+                },
+                {
+                    "member_id": "22345",
+                    "feed_date": "20240115",
+                    "redemptions": [
+                        {
+                            "txn_id": "RX10098",
+                            "txn_date": "20240107",
+                            "partner": "NorthStar",
+                            "miles_redeemed": 7000,
+                            "status": "COMPLETED",
+                        },
+                        {
+                            "txn_id": "RX10099",
+                            "txn_date": "20240115",
+                            "partner": "SkyPoints",
+                            "miles_redeemed": 1000,
+                            "status": "PENDING",
+                        },
+                    ],
+                },
+            ],
+            indent=2,
+        )
+        + "\n",
         encoding="utf-8",
     )
     print(f"Wrote {MEMBER_FILE}")

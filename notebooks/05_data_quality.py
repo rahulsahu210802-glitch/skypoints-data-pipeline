@@ -18,13 +18,13 @@ redemptions = spark.table(f"{prefix}`silver_redemptions`")
 
 country_tables = [
     spark.table(f"{prefix}`members_india`")
-    .select("source_member_id", "country_code")
+    .select("member_business_key", "source_member_id", "country_code")
     .withColumn("_expected_country", F.lit("IND")),
     spark.table(f"{prefix}`members_usa`")
-    .select("source_member_id", "country_code")
+    .select("member_business_key", "source_member_id", "country_code")
     .withColumn("_expected_country", F.lit("USA")),
     spark.table(f"{prefix}`members_australia`")
-    .select("source_member_id", "country_code")
+    .select("member_business_key", "source_member_id", "country_code")
     .withColumn("_expected_country", F.lit("AUS")),
 ]
 gold_members = country_tables[0].unionByName(country_tables[1]).unionByName(country_tables[2])
